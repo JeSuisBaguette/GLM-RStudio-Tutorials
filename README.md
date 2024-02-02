@@ -4,4 +4,4 @@ This repository contains code for my completion of all the assigned DiscovR tuto
 
 The relevant code can be found within the "quarto" folder in the .qmd file. The folder also contains a .html rendered file of the code. The dataset(s) used for each tutorial can be found within the "data" section. If images have been inserted into the .qmd file, they can also be found within this folder for each tutorial unless an "images" folder also exists. 
 
-The "tutorials_html" folder contanins the rendered HTML file for all tutorials as well.
+The "tutorials_html" folder contains the rendered HTML file for all tutorials as well.
