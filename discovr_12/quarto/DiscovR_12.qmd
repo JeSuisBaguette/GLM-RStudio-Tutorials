@@ -1,0 +1,648 @@
+---
+title: "DiscovR_12"
+author: "Ferdinand Edward Bitan"
+format: 
+  html:
+    self-contained: true
+    theme: darkly
+    toc: true
+    code-fold: true
+knitr: 
+  opts_chunk: 
+    warning: false
+    message: false
+editor: visual
+---
+
+# DiscovR_12
+
+## Libraries
+
+```{r}
+library(BayesFactor)
+library(broom)
+library(car)
+library(effectsize)
+library(emmeans)
+library(here)
+library(ggfortify)
+library(Hmisc)
+library(knitr)
+library(modelbased)
+library(parameters)
+library(sandwich)
+library(tidyverse)
+```
+
+## Data
+
+```{r}
+pupluv_tib <- here::here("data/puppy_love.csv") |>
+  readr::read_csv() |>
+  dplyr::mutate(
+    dose = forcats::as_factor(dose)
+  )
+```
+
+```{r}
+cure_tib <- here::here("data/hangover.csv") |>
+  readr::read_csv() |>
+  dplyr::mutate(
+    drink = forcats::as_factor(drink) |> forcats::fct_relevel("Water", "Lucozade", "Cola")
+  )
+```
+
+## Puppy Love
+
+The previous tutorial focussed on an example in which a researcher tested the efficacy of puppy therapy by exposing different groups of randomly-assigned people to (1) a no puppies control group; (2) 15 minutes of puppy therapy; and (3) 30 minutes of puppy contact. The dependent variable was a measure of happiness ranging from 0 (as unhappy as I can possibly imagine being) to 10 (as happy as I can possibly imagine being). The researchers who conducted the puppy therapy study realized that a participants love of dogs could affect whether puppy therapy affected happiness. Therefore, they replicated the study on different participants, but included a self-report measure of love of puppies from 0 (I am a weird person who hates puppies, please be deeply suspicious of me) to 7 (puppies are the best thing ever, one day I might marry one). The data are in pupluv_tib, which contains the variables **id** (the participants id code), **dose** (1 = control, 2 = 15 minutes, 3 = 30 minutes), **happiness** (the persons happiness on a scale from 0-10), and **puppy_love** (the love of puppies from 0 to 7)
+
+```{r}
+pupluv_tib
+```
+
+Note that there are four variables: the participant's **id**, which is a character variable (note the under the name), the **dose** of puppy therapy, which is a factor (note the under the name), and the happiness score which is numeric and has the data type 'double' (note the under the name) and their love of puppies (**puppy_love**), which also has the data type 'double'.
+
+The variable **dose** is a factor (categorical variable), so having read the data file and converted it to a factor it's a good idea to check that the levels of **dose** are in the order that we want: Control, 15 minutes, 30 minutes.
+
+```{r}
+levels(pupluv_tib$dose)
+```
+
+**If the levels of dose were in the wrong order what function could we use to reorder the levels?**
+
+[`forcats::fct_relevel()`]{.underline}
+
+`forcats::reorder()`
+
+`dplyr::fct_levels()`\
+\
+*Specifically, we could use this code: `pupluv_tib <- pupluv_tib |>`*
+
+*`dplyr::mutate(dose = forcats::fct_relevel(dose, "No puppies", "15 mins", "30 mins"))`*
+
+## Exploring the Data
+
+Happiness scores split by the therapy group to which a person belonged.
+
+```{r}
+pup_sum <- pupluv_tib |> 
+  dplyr::group_by(dose) |> 
+  dplyr::summarise(
+    mean = mean(happiness, na.rm = TRUE),
+    '95% CI lower' = mean_cl_normal(happiness)$ymin,
+    '95% CI upper' = mean_cl_normal(happiness)$ymax
+  )
+
+pup_sum |> 
+  knitr::kable(digits = 3)
+```
+
+## Visualising the Data
+
+```{r}
+ggplot2::ggplot(pupluv_tib, aes(x = dose, y = happiness, color = dose)) +
+  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
+  geom_violin(alpha = 0.2) +
+  stat_summary(fun.data = "mean_cl_normal", geom = "pointrange", position = position_dodge(width = 0.9)) +
+  coord_cartesian(ylim = c(0, 10)) +
+  scale_y_continuous(breaks = 0:10) +
+  labs(x = "Puppy therapy group", y = "Happiness (0-10)", colour = "Puppy therapy group") +
+  theme_minimal()
+```
+
+The mean happiness is very similar in the 15- and 30-minute groups and higher in these groups than the no puppies control.
+
+```{r}
+ggplot2::ggplot(pupluv_tib, aes(x = puppy_love, y = happiness, colout = dose, fill = dose)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  coord_cartesian(ylim = c(0, 10)) +
+  scale_x_continuous(breaks = 0:7) +
+  scale_y_continuous(breaks = 0:10) +
+  labs(x = "Puppy love (0-7)", y = "Happiness (0-10)", colour = "Treatment", fill = "Treatment") +
+  theme_minimal()
+```
+
+It looks like puppy love has a positive relationship to happiness in the no puppy and 15-minute groups, but a negative relationship in the 30-minute group.
+
+## The Model
+
+As a reminder, we discovered in **discovr_11** that we can include categorical predictors using dummy variables. In the simplest form, we can use dummy coding in which group membership is expressed in terms of 0s and 1s as in the table below.
+
+| Group                | Dummy 1 (long) | Dummy 2 (short) |
+|----------------------|----------------|-----------------|
+| No puppies (control) | 0              | 0               |
+| 15 minutes           | 0              | 1               |
+| 30 minutes           | 1              | 0               |
+
+The model we fitted in the previous tutorial (in which we compared means across the three groups without adjusting for the love of puppies) involved predicting happiness from the two dummy variables in Table 1, which represent the difference between the 15-minute group and the control (**short**) and the 30-minute group and the no puppies control (**long**):
+
+$$
+happiness_i = \hat\beta_0 + \hat\beta_1long_i + \hat\beta_2short_i + \epsilon_i
+$$
+
+A persons happiness is predicted from knowing their group membership (i.e., the numeric values for the long and short dummy variables in Table 1) and the estimates of the parameters for these effects and the intercept (b_0). This equation can be extended to include a continuous predictor (sometimes referred to as a covariate) by adding this variable and assigning it a parameter (a *b*). In this case, to include the variable **puppy_love** the model is extended to:
+
+$$
+happiness_i = \hat\beta_0 + \hat\beta_1long_i + \hat\beta_2short_i + \hat\beta_3{puppy love}_i + \epsilon_i
+$$
+
+Remember that R will dummy code **dose** for you, so you don't need to create the variables **long** and **short** in the equation, you need only to enter **dose** as a predictor. Remember to use `broom::tidy()` to show the model parameters.
+
+```{r}
+lm(happiness ~ puppy_love + dose, data = pupluv_tib) |> 
+  broom::tidy(conf.int = TRUE) |> 
+  knitr::kable(digits = 3)
+
+```
+
+The basic process for fitting a model that compares means while adjusting for a continuous variable (covariate) is as follows:
+
+1.  Assess the independence of the covariate (not a statistical requirement but helps with interpretation)
+
+2.  Think about sums of squares and (usually) set orthogonal contrasts
+
+3.  Fit the model and look at overall effects with *F*-statistics
+
+4.  Look at the model parameter estimates and adjusted means
+
+5.  Check the model diagnostics and possibly fit a robust version of the model.
+
+6.  Assess homogeneity of regression slopes
+
+## Independence of the Covariate
+
+The first issue is whether the covariate is independent of the categorical predictor. Although independence is not a statistical condition, it is easier to interpret the categorical predictor if we know that levels of the covariate are similar across the categories. We can test this by simply fitting a model, using `lm()` that predicts the covariate from the categorical predictor. If the categorical predictor does not significantly predict the covariate then they can be thought of as relatively independent (notwithstanding that significance will depend on sample size).
+
+```{r}
+luvdose_lm <- lm(puppy_love ~ dose, data = pupluv_tib) 
+anova(luvdose_lm) |> 
+  knitr::kable(digits = 3)
+```
+
+The main effect of dose is not significant, *F*(2, 27) = 1.98, *p* = 0.158, which shows that the average level of love of puppies was (statistically speaking) roughly the same in the three puppy therapy groups. In other words, the means for love of puppies are not significantly different across the control, 15- and 30-minute groups. This result is good news for using love of puppies as a covariate to adjust the means in the model.
+
+## F-statistics with Multiple Predictors
+
+We have seen how the *F*-statistic is used to evaluate the overall fit of a linear model, we've also seen that it can be used to look at the overall effect of a predictor: in the previous tutorial we used it to evaluate the overall effect of the puppy therapy group to which a person was assigned on happiness ratings. However, when we use the *F*-statistic to evaluate the unique contribution of more than one predictor to a model we need to be mindful of how *F* is calculated.
+
+The code below contains the model that we have already fitted above, which predicts happiness from **puppy_love** and **dose**, but pipes it into `anova()` to get an *F*-statistic for each predictor. In the same code box, underneath the existing code, fit the same model but change the order of predictors so that **dose** is listed before **puppy_love**
+
+```{r}
+lm(happiness ~ puppy_love + dose, data = pupluv_tib) |> 
+  anova()
+```
+
+```{r}
+lm(happiness ~ dose + puppy_love, data = pupluv_tib) |> 
+  anova()
+```
+
+Note that when we specify **puppy_love** as the first predictor then, according to the *F*-statistic, it doesn't have a significant effect but **dose** does, but if we specify it second then **puppy_love** has a significant effect but **dose** doesn't. In other words, we get different values of the sums of squares, *F*s and *p*s. If you look at the parameter estimates using `broom::tidy()` (and their significance tests), you'll see that they are the same for the two models, but for the *F*-statistics the order that you specify predictors matters.
+
+### Type III Sums of Squares
+
+The sums of squares on which the *F*-statistic is based can be calculated in different ways. By default, *F* is computed using Type I, or sequential, sums of squares. This means that any predictor entered into the model is evaluated after predictors before it in the model. Hence, order matters: if you specify the model as happiness \~ puppy_love + dose then **puppy_love** is evaluated as the only term in the model whereas if you specify the model as happiness \~ dose + puppy_love then, because it is listed after **dose**, it is evaluated after the effect of **dose** has already been entered into the model and evaluated. For this reason, Type I sums of squares tend not to be used to evaluate hypothesis about main effects and interactions (because the order of predictors changes the results).
+
+Typically then, when evaluating the overall effect of several predictors in a model using *F*-statistics we tend to use Type III sums of squares. Type III sums of squares differ from Type I in that all effects are evaluated taking into consideration all other effects in the model (not just the ones entered before). As such, the order that you specify predictors doesn't affect the results.
+
+**What's the pragmatic difference between Type I and Type III sums of squares**
+
+[For Type III sums of squares the order that you specify predictors doesn't affect the resulting sums of squares, for Type I sums of squares it does.]{.underline}
+
+For Type I sums of squares the order that you specify predictors doesn't affect the resulting sums of squares, for Type III sums of squares it does.
+
+::: callout-note
+## Type III in R
+
+If you want to use Type III sums of squares then you **must** set orthogonal contrasts, you cannot, for example, enter the categorical predictor and let  do dummy coding for you.
+:::
+
+## Orthogonal Contrasts
+
+We've just discovered that to use Type III sums of squares we **must** set orthogonal contrasts. In the previous tutorial, we predicted that any form of puppy therapy should be better (i.e. higher happiness scores) than the no puppies condition and that as exposure time increases happiness will increase too (a dose-response hypothesis). We operationalized these hypotheses as two dummy variables using the contrast coding in the table below.
+
+| Group                | Dummy 1 (No puppies vs. puppies) | Dummy 2 (15 mins vs 30 mins) |
+|----------------------|----------------------------------|------------------------------|
+| No puppies (control) | -2/3                             | 0                            |
+| 15 minutes           | 1/3                              | -1/2                         |
+| 30 minutes           | 1/3                              | 1/2                          |
+
+The model we are fitting is:
+
+$$
+happiness_i = \hat\beta_0 + \hat\beta_1contrast1_i + \hat\beta_2contrast2_i + \epsilon_i
+$$
+
+In which the variables **contrast 1** and **contrast 2** are the dummy variables that represents the no puppies group compared to all other groups (**contrast 1**), and the difference between the 15-minute group and the 30-minute group (**contrast 2**). These contrasts are orthogonal, so if we set these, we can use Type III sums of squares.
+
+We also learnt that we can set these contrasts for **dose** using the `contrasts()` (go back over **discovr_11** if this code doesn't make sense to you):
+
+```         
+puppy_vs_none <- c(-2/3, 1/3, 1/3) 
+short_vs_long <- c(0, -1/2, 1/2) 
+contrasts(pupluv_tib$dose) <- cbind(puppy_vs_none, short_vs_long)
+```
+
+If we didn't have specific hypotheses to test, or we had hypotheses that couldn't be operationalized as orthogonal contrasts, then for the purpose of getting Type III sums of squares we could just set a Helmert contrast:
+
+```         
+contrasts(categorical_variable) <- contr.helmert(n)
+```
+
+In which categorical_variable is the variable for which you're setting a contrast, and n is the number of levels of that variable. So, for **dose**, which has three levels, we'd execute:
+
+```         
+contrasts(pupluv_tib$dose) <- contr.helmert(3)
+```
+
+```{r}
+puppy_vs_none <- c(-2/3, 1/3, 1/3)
+short_vs_long <- c(0, -1/2, 1/2)
+contrasts(pupluv_tib$dose) <- cbind(puppy_vs_none, short_vs_long)
+contrasts(pupluv_tib$dose) # To view that the weights are assigned correctly
+
+```
+
+## Fitting the Model
+
+Having set orthogonal contrasts, we can fit the model and then use the `car::Anova()` function to get Type III sums of squares for the overall effects.
+
+To get *F*-statistics based on Type III sums of squares we can use the following general code:
+
+```         
+car::Anova(my_model, type = 3)
+```
+
+So, you create a model using `lm()` in the usual way, then within `Anova()` replace my_model with the name of the model you have just created. You specify Type III sums of squares by including type = 3 or type = "III".
+
+```{r}
+pupluv_lm <- lm(happiness ~ puppy_love + dose, data = pupluv_tib)
+car::Anova(pupluv_lm, type = 3) |> 
+  knitr::kable(digits = 3)
+```
+
+Looking first at the significance values, the covariate significantly predicts the dependent variable (*p* = 0.035, which is less than 0.05). Therefore, the persons happiness is significantly influenced by their love of puppies. What's more interesting is that when the effect of love of puppies is held constant, the effect of puppy therapy is significant (*p* = 0.027, which is less than 0.05).
+
+**The effect of dose in the output tells us about whether the means differ across the therapy groups. What does the value of 0.027 mean?**
+
+It is the probability that the means of the three therapy groups are not identical
+
+It is the probability that the means of the three therapy groups are identical
+
+It is the probability that the *F* value of 4.142 has occurred by chance
+
+[It is the probability of getting a value of *F* at least as big as 4.142 if the null hypothesis were true (i.e. if the means for the three therapy groups were identical).]{.underline}
+
+## Adjusted Means
+
+Earlier on we computed the group means. They're displayed again in the table below.
+
+| dose       | mean | 95% CI lower | 95% CI upper |
+|------------|------|--------------|--------------|
+| No puppies | 3.22 | 1.85         | 4.60         |
+| 15 mins    | 4.88 | 3.66         | 6.09         |
+| 30 mins    | 4.85 | 3.57         | 6.12         |
+
+Based on the table, you might think that the significant *F*-statistic for **dose** reflects a difference between the control group and the two experimental groups (because the 15- and 30-minute groups have very similar means, 4.88 and 4.85, whereas the control group mean is much lower at 3.22). However, we cant use these means to interpret the effect because they have not been adjusted for the effect of the covariate.
+
+To get the means adjusted for the covariate we use the `modelbased::estimate_means()` function, which takes the general form:
+
+```         
+modelbased::estimate_means(my_model,
+                          levels = "predictors",
+                          fixed = "covariates",
+                          ci = 0.95)
+```
+
+We replace my_model the name of the model into the function, then optionally specify these arguments:
+
+-   levels = "predictors": the predictor(s) over which you want to compute means. In our case, we want means for the variable **dose**, so we could specify levels = "dose".
+
+-   fixed = "covariates": the predictor(s) that you want to remain fixed (i.e. the variables that you want to adjust the means by). In our case, we want adjust means by the variable **puppy_love**, so we could specify fixed = "puppy_love".
+
+-   ci = 0.95: specifies the width of the confidence interval. It defaults to a 95% confidence interval so if you're happy with that you can leave this argument out.
+
+Although we can explicitly set the levels and fixed arguments, we don't need to in this case because the predicted means from the model will be the adjusted means. However, it is useful to specify the fixed argument because doing so means that the output includes the value of the covariate at which the means are being adjusted. In other words, it will show us the mean level of **puppy_love**.
+
+```{r}
+modelbased::estimate_means(pupluv_lm, levels = "dose", fixed = "puppy_love") |> 
+  knitr::kable(digits = 3)
+```
+
+From these adjusted means you can see that at average levels of puppy love, happiness increased across the three doses.
+
+## Parameter Estimates
+
+We can view the parameter estimates in the usual way using `broom::tidy()`:
+
+```{r}
+broom::tidy(pupluv_lm, conf.int = TRUE) |> 
+  knitr::kable(digits = 3)
+```
+
+**How would you interpret the effect of the covariate?**
+
+[There is a significant relationship between the love of puppies and happiness: as love of puppies increases, happiness scores increase also]{.underline}
+
+There is a significant relationship between the love of puppies and happiness: as love of puppies increases, happiness scores decrease
+
+As love of puppies increases, happiness does not change significantly\
+\
+*The t-statistic and p-value tell us that the relationship between the love of puppies and happiness is significant, and the value of b is positive (0.416) indicating that as love of puppies increases so does happiness. A negative coefficient would mean the opposite: as one increases, the other decreases.*
+
+Moving onto the dummy variables, the first one (**dosepuppy_vs_none**) compares the control group with the 15- and 30-minute groups combined. Using the contrast codes that we have used, the *b*-value is the difference between the adjusted mean of the control group and the average of the adjusted means for the 15- and 30-minute groups. The associated *t*-statistic is significant (*p* = 0.010), indicating that the control group was significantly different from the combined adjusted mean of the puppy therapy groups. The *b*-value for the second dummy variable (**doseshort_vs_long**) is the difference between the adjusted means of the 15- and 30-minute groups. The associated *t*-statistic is not significant (*p* = 0.593), indicating that the 30-minute group did not produce significantly different happiness than the 15-minute group after adjusting for love of puppies.
+
+The *b*s in this output are raw effect sizes. I can't stress enough how useful it can be to interpret these. For example, the difference in happiness in the no puppy group compared to the combined puppy groups was 2.01. So, happiness was about 2 points higher on the scale (which ranged from 0-10), on average, for those who had some puppy therapy compared to those that didn't. You can evaluate for yourself whether this difference is meaningful based on what we might know about the happiness scale.
+
+## Post-hoc Tests
+
+We can obtain *post hoc* tests in the same way that we did in **discovr_11** when we fitted the same model but without the covariate. Basically, we use the `modelbased::estimate_contrasts()` function and, like when we used the the `estimate_means()` function earlier we can optionally specify the covariate as a fixed variable so that the output shows us the value at which other effects are evaluated.
+
+Post hoc test using a Bonferroni adjustment:
+
+```{r}
+modelbased::estimate_contrasts(pupluv_lm,
+                                contrast = "dose",
+                                fixed = "puppy_love",
+                                adjust = "bonferroni") |> 
+  knitr::kable(digits = 3)
+```
+
+The results show the Bonferroni corrected *post hoc* comparisons. There is a significant difference between the adjusted mean happiness in the no puppies group and the 30-minute group (*p* = 0.031) groups, but not between the no puppies and 15-minute group (*p* = 0.136) or between the 30- and 15-minute groups (*p* = 1.000). Note that the value of *Difference* is the difference between the adjusted means. The column labelled *puppy_love* reminds us that all differences are evaluated at average levels of puppy love, in other words, when puppy love equals 2.73.
+
+## Diagnostic Plots
+
+As with any linear model, we can use the `plot()` function to produce diagnostic plots from the model.
+
+Remember that `plot()` takes this general form:
+
+```         
+plot(my_model, which = numbers_of_the_plots_you_want)
+```
+
+You can also use `ggplot2::autoplot()` to make pretty versions of the plot. To use this function outside of the tutorial remember to execute `library(ggfortify)`
+
+```{r}
+#plot(pupluv_lm, which = c(1, 3, 2, 4))
+
+# or to get  a nicely formatted plots
+# library(ggfortify)  # outside of this tutorial you'll need this
+
+ggplot2::autoplot(pupluv_lm,
+                  which = c(1, 3, 2, 4),
+                  colour = "#5c97bf",
+                  smooth.colour = "#ef4836",
+                  alpha = 0.5,
+                  size = 1) + 
+  theme_minimal()
+```
+
+**How would you interpret the *Residual vs. fitted* and *Scale-location* plots?**
+
+[Were in trouble: I see heteroscedasticity.]{.underline}
+
+I'm not sure, give me a hint.
+
+Everything is fine - residuals show homogeneity.\
+\
+*The red line on the scale-location plot slopes up and the cloud of dots seems to fan out on both plots indicating heteroscedasticity.*
+
+**Based on the Q-Q plot, can we assume normality of the residuals?**
+
+[No]{.underline}
+
+Give me a clue
+
+Yes
+
+**Based on the plot of Cook's distance, are there any influential cases?**
+
+Maybe
+
+[No]{.underline}
+
+Yes
+
+*The largest Cook's distance is about 0.2 which is well below the threshold of 1 at which we'd worry.*
+
+## Robust Models
+
+As for previous linear models(e.g., in **discovr_08** and **discovr_11**), we can get robust parameter estimates using `robust::lmRob()` and robust tests of these parameters using `parameters::model_parameters()`.
+
+```{r}
+pupluv_rob <- robust::lmRob(happiness ~ puppy_love + dose, data = pupluv_tib)
+summary(pupluv_rob)
+```
+
+The bottom of the output shows significance tests of bias. These tests suggest that bias in the original model is not problematic (because the *p*-value for these tests are not significant), but these tests are based on small samples and so have low power. More important, the robust parameter estimates have changed and are all non-significant (compare with the non-robust model). For example, for the covariate the estimate has changed from 0.42 to 0.63 and the significance value is now 0.287 instead of 0.035. For the dummy variable that compares no puppies to puppies, the *b* has decreased from 2.01 to 1.63 and the *p*-value has increased from 0.01 to 0.391.
+
+Remember from **discovr_08** that to get a summary of an existing model like pupluv_lm that uses heteroscedasticity-consistent standard errors (i.e. robust significance tests and confidence intervals), we put the model into `model_parameters()` and set vcov = "HC4". 
+
+```{r}
+parameters::model_parameters(pupluv_lm, vcov = "HC4") |> 
+  knitr::kable(digits = 3)
+```
+
+We see a different picture when we fit the model with heteroskedasticity-consistent standard errors. The parameter estimates will match the non-robust model but the standard errors, *p*-values and confidence intervals change because these are based on methods robust to heteroscedasticity (the HC4 estimates that we asked for). We can interpret the effects for dose in the same way as for the regular *p*-values and confidence intervals. For the effect of puppy love, The HC4 robust confidence interval and *p*-value supports the conclusion from the non-robust model: the *p*-value is 0.038, which less than 0.05, and the confidence interval does not contain zero \[0.03, 0.81\].
+
+Given the small sample size, we might consider a bootstrap model instead of the robust model we have just fitted. We can obtain this model using the `bootstrap_parameters()` function from `parameters`, which takes the general form:
+
+```         
+parameters::bootstrap_parameters(my_model)
+```
+
+In which we replace my_model with the name of the object containing the nonrobust model (in this case pupluv_lm)
+
+```{r}
+parameters::bootstrap_parameters(pupluv_lm) |> 
+  knitr::kable(digits = 3)
+```
+
+The estimates themselves are quite similar to those from the non-robust model: the effect of puppy love on happiness is now non-significant, and the effect of puppies compared to none is significant.
+
+**When I ran the analysis, the bootstrap confidence interval for the *b* for puppy_love ranges from -0.01 to 0.70 (your values will differ slightly because of how bootstrapping works). What does this tell us?**
+
+There is a 95% chance that the population *b* lies between -0.01 and 0.70.
+
+The probability of this confidence interval containing the population value is 0.95.
+
+[If this confidence interval is one of the 95% that contains the population value then the population value of the *b* lies between -0.01 and 0.70.]{.underline}
+
+I can be 95% confident that the population value of the *b* lies between -0.01 and 0.70.
+
+**Which of the following statements about bootstrap confidence intervals is true?**
+
+Conventional confidence intervals are more robust to outliers than bootstrap confidence intervals.
+
+Bootstrap confidence intervals are unnecessary in small samples
+
+Bootstrap confidence intervals always tell us something about population values.
+
+[Bootstrap confidence intervals do not assume a normal sampling distribution.]{.underline}\
+\
+*This statement is true: bootstrapping is a technique from which the sampling distribution of a statistic is estimated empirically from the data so no assumptions about its shape are made.*
+
+## Effect Sizes
+
+We have talked about effect sizes for specific effects at various other points in this tutorial. We can also obtain effect sizes for the overall effect of a predictor (i.e. effect sizes that relate to the *F*-statistics for each predictor).
+
+We can use the `eta_squared()` and `omega_squared()` functions from the `effectsize` package (Ben-Shachar, Lüdecke, and Makowski 2020; Ben-Shachar et al. 2022), which take the general form:
+
+```         
+effectsize::eta_squared(anova_object, partial = TRUE, ci = 0.9) 
+effectsize::omega_squared(anova_object, partial = TRUE, ci = 0.9)
+```
+
+All we do is put the ANOVA object into the function (or pipe it in). By default you'll get partial eta-squared (η\^2_p) and partial omega-squared (ω\^2_p), but you can get the non-partial version by setting partial = FALSE. You'll also get (by default) a 90% confidence interval, which you might want to change to some other value.
+
+The function uses the sums of squares from the object that is passed into it, so its safest to re-use our earlier code with `car::Anova()` where we set the sums of squares and pipe it into the function.
+
+```{r}
+car::Anova(pupluv_lm, type = 3) |> 
+  effectsize::eta_squared(ci = 0.95) |> 
+  knitr::kable(digits = 3)
+```
+
+These values show that puppy therapy condition explains 24% of the variance in happiness not attributable to other variables, which is sizeable. Love of puppies explains 16%, which is also a lot. Partial eta-squared is the most straightforward measure to explain, but like eta-squared it is biased and so its typically better to use partial omega squared (ω\^2_p), which is an unbiased version.
+
+```{r}
+car::Anova(pupluv_lm, type = 3) |> 
+  effectsize::omega_squared(ci = 0.95) |> 
+  knitr::kable(digits = 3)
+
+```
+
+The effect sizes are slightly smaller than (as we'd expect) using omega-squared. The puppy therapy condition explains 17% of the variance in happiness not attributable to other variables, and love of puppies explains 12%, both of which are still sizeable amounts of variance for social science data.
+
+## Interactions Between Categorical and Continuous Predictors
+
+People talk about the 'assumption' of homogeneity of regression slopes when the goal of the model is to look for differences between adjusted means (a so-called ANCOVA). To test the assumption of homogeneity of regression slopes we need to re-fit the model but include the interaction between the covariate and categorical predictor. We want that interaction effect to be non-significant and have a parameter estimate that reflects a small effect.
+
+In other contexts, a significant interaction between a continuous and categorical predictor might be desirable: for example, it provides support for moderation (that is the effect of one predictor moderates the effect of the other - see `discovr_10`).
+
+The information box explains more, but in this section we'll look at introducing an interaction term between the categorical predictor (**dose**) and the continuous predictor (**puppy_love**).
+
+**Homogeneity of regression slopes**
+
+Homogeneity of regression slopes refers to the relationship between the covariate and outcome being similar across levels of the categorical predictor. In this model, homogeneity of regression slopes would mean that the relationship between **puppy_love** and **happiness** is similar in the no puppies, 15-minute and 30-minute groups. We know this is unlikely to be true from the scatterplot that we produced at the beginning of this tutorial.
+
+Homogeneity of regression slopes is desirable only if the goal is to look at the effect of the categorical variable adjusting for the covariate. In this case, what is the effect of puppy therapy at average levels of puppy love? If the relationship between puppy love and happiness changes as a function of the treatment group (i.e. heterogeneity of regression slopes) then the effect of puppy therapy is undetermined because it varies according to the value of the covariate.
+
+However, in other situations homogeneity of regression doesn't matter. For example, in `discovr_10` we explored moderation effects; that is, where we hypothesize that the effect of one predictor varies as a function of another. When your aim is to test for moderation between a categorical and continuous predictor a significant interaction provides support for moderation (it shows that the effect of one predictor varies as a function of the other). So, it's not the case that an interaction between a categorical and continuous predictor is necessarily a bad thing - it depends on the context.
+
+We can refit the model from scratch:
+
+```         
+hors_lm <- lm(happiness ~ puppy_love*dose, data = pupluv_tib)
+```
+
+Or use the `update()` function to add the interaction term to the previous model:
+
+```         
+hors_lm <- update(pupluv_lm, .~. + dose:puppy_love)
+```
+
+The update function takes the model containing the effects of dose and puppy_love (pupluv_lm) and updates it. Remember that `.~.` means *keep the outcome variable and all of the predictors* and , and `+ dose:puppy_love` means *add the dose × puppy_love interaction*.
+
+::: callout-note
+## \* and :
+
+`*` is used to specify all main effects and interactions whereas `:` is used to specify only an interaction.
+
+-   `puppy_love*dose` specifies the effects of **puppy_love**, *dose* and the **dose × puppy_love** interaction
+
+-   `puppy_love:dose` specifies the **dose × puppy_love** interaction
+:::
+
+```{r}
+hors_lm <- lm(happiness ~ puppy_love*dose, data = pupluv_tib) 
+car::Anova(hors_lm, type = 3) |> 
+  knitr::kable(digits = 3)
+# or
+hors_lm <- update(pupluv_lm, .~. + dose:puppy_love)
+car::Anova(hors_lm, type = 3) |> 
+  knitr::kable(digits = 3)
+
+
+```
+
+The effects of the dose of puppy therapy and love of puppies are still significant, but so is the covariate by outcome interaction (**dose × puppy_love**), implying that the assumption of homogeneity of regression slopes is not realistic (*p* = 0.028). This result isn't too surprising because at the beginning of this tutorial we plotted the relationship between **puppy_love** and **happiness** in the three therapy groups and found a positive relationship in the no puppy and 15-minute group but a negative relationship in the 30-minute group. Remember, the plot looked like this:
+
+![](images/unnamed-chunk-25-1.png)
+
+The significant interaction is "bad" from the perspective of interpreting the effect of puppy therapy dose at average levels of puppy love. We can't make firm conclusions about the effect of puppy therapy adjusted for the love of puppies. Sad face.
+
+However, in a parallel universe where we'd hypothesised and pre-registered a hypothesis that puppy love would moderate the effect of puppy therapy we'd be dancing around the room with joy at this significant result. We might also want to break the interaction down and look at the simple slopes (that is, the relationship between **puppy_love** and **happiness** within each treatment group). We can do this using what we learnt in `discovr_10` but we can also use the `estimate_slopes()` function from `modelbased`. It takes the form
+
+```         
+modelbased::estimate_slopes(my_model,
+                            trend = "continuous_variable",
+                            at = "categorical_variable",
+                            ci = 0.95)
+```
+
+Within the function we replace my_model with the model we have created (hors_lm), replace continuous_variable with the continuous predictor (**puppy_love**) and categorical_variable with the grouping variable (**dose**). By default it will return 95% confidence intervals so we can omit this argument unless we want to use a different level.
+
+```{r}
+pup_slopes <- modelbased::estimate_slopes(hors_lm,
+                                          trend = "puppy_love",
+                                          at = "dose",
+                                          ci = 0.95)
+pup_slopes |>
+  knitr::kable(digits = 3)
+
+```
+
+In the no puppy group, b\^ = 0.76 \[0.21, 1.31\], *t* = 2.86, *p* = 0.009, and the 15-minute group, b\^ = 0.82 \[0.11, 1.53\], *t* = 2.40, *p* = 0.025, there were significant positive relationships between loving puppies and happiness. However, in the 30-minute group there was a nonsignificant relationship between loving puppies and happiness, b\^ = -0.22 \[-0.79, 0.35\], *t* = -0.79, *p* = 0.436. The significant interaction seems to reflect that the positive relationship between loving puppies and happiness is 'wiped out' by 30 minutes of puppy therapy. One interpretation of this effect might be that the 30-minutes of puppy therapy raises everyone's happiness, which attenuates the relationship between loving puppies and happiness.
+
+## Bayes Factors
+
+Like in previous tutorials (**discovr_08**, **discovr_09**, **discovr_11**) we can use the `BayesFactor` package (Morey and Rouder 2018). In this scenario we use the `lmBF()` function.
+
+The `lmBF()` function has basically the same format as the `BayesFactor::anovaBF()` function, which we met in **discovr_11**:
+
+```         
+my_model <- BayesFactor::lmBF(formula = outcome ~ predictor,
+                              data = my_tib,
+                              rscaleFixed = "medium",
+                              rscaleCont = "medium")
+```
+
+Like the `anovaBF()` function, `lmBF()` uses default priors for categorical variables (rscaleFixed) that can be specified as a number or as "medium" (the default), "wide", and "ultrawide". These labels correspond to *r* scale values of 1/2, √2/2, and 1. To set the prior for the covariate (a continuous predictor) we use a new argument rscaleCont, which is set using a value or with pre-set values of "medium", "wide", and "ultrawide", which correspond *r* scales of √2/4, \^1/\_2, and √2/2. Note these values are different to the corresponding values for rscaleFixed.
+
+We could, therefore, obtain a Bayes factor for the entire model with the following code:
+
+```         
+pup_bf <-  BayesFactor::lmBF(formula = happiness ~ puppy_love + dose, data = pupluv_tib, rscaleCont = "medium", rscaleFixed = "medium")
+```
+
+However, this Bayes factor isn't particularly interesting because it evaluates the model in its entirety. We are probably more interested in quantifying the effect of **dose** above and beyond love of puppies. To do this we can find the Bayes factor for the model containing only the covariate (love of puppies) and compare it to the Bayes factor for the model that also includes *dose*. We'd do this as follows:
+
+```         
+pupcov_bf <-  BayesFactor::lmBF(formula = happiness ~ puppy_love, data = pupluv_tib, rscaleFixed = "medium", rscaleCont = "medium")  
+
+pupcov_bf  
+
+pup_bf <-  BayesFactor::lmBF(formula = happiness ~ puppy_love + dose, data = pupluv_tib, rscaleCont = "medium", rscaleFixed = "medium")  
+
+pup_bf/pupcov_bf
+```
+
+The first bit of code creates an object called pupcov_bf that contains the Bayes factor for the model containing **puppy_love** compared to the model containing only the intercept (i.e. no predictors). We view this object by executing `pupcov_bf`. The third bit of code creates an object called pup_bf that contains the Bayes factor for the model containing **puppy_love** and **dose** compared to the model containing only the intercept (i.e. no predictors). However, we want the Bayes factor for the model containing **puppy_love** and **dose** compared to the model containing **puppy_love**. We get this using the code `pup_bf/pupcov_bf`.
+
+```{r}
+pupcov_bf <-  BayesFactor::lmBF(formula = happiness ~ puppy_love, data = pupluv_tib, rscaleFixed = "medium", rscaleCont = "medium")
+
+pupcov_bf
+
+pup_bf <-  BayesFactor::lmBF(formula = happiness ~ puppy_love + dose, data = pupluv_tib, rscaleCont = "medium", rscaleFixed = "medium")
+
+pup_bf/pupcov_bf
+```
+
+Looking at the first Bayes factor, the data are 0.68 times more likely under the alternative hypothesis (happiness is predicted from love of puppies) than under the null (love of puppies does not predict happiness). Our beliefs that love of puppies affects happiness (relative to not) should increase by a factor of about 0.68 -- in other words it should get smaller and move towards the null. However, this value is fairly is very weak evidence.
+
+The Bayes factor computed using `pup_bf/pupcov_bf` is computed using a sampling process and so will change very slightly each time you run the code. It also means the value I report will differ from the one you obtain, which is confusing but nothing to worry about.
+
+Looking at the second Bayes factor, the data are about 2.11 times more likely under the model that predicts happiness from dose of therapy and love of puppies than under the model that predicts happiness from love of puppies alone. In other words, our beliefs that puppy therapy if efficacious (relative to not) should increase by a factor of about 2.11 (not particularly strong evidence).

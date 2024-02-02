@@ -1,0 +1,1058 @@
+---
+title: "DiscovR_08"
+author: "Ferdinand Edward"
+format: 
+  html:
+    self-contained: true
+    theme: darkly
+    toc: true
+    code-fold: true
+knitr: 
+  opts_chunk: 
+    warning: false
+    message: false
+editor: visual
+---
+
+# DiscovR_08
+
+## Libraries
+
+```{r}
+library(BayesFactor)
+library(broom)
+library(GGally)
+library(ggfortify)
+library(here)
+library(knitr)
+library(parameters)
+library(robust)
+library(tidyverse)
+
+```
+
+## Data
+
+```{r}
+album_tib <- here::here("data/album_sales.csv") |> readr::read_csv()
+soc_anx_tib <- here::here("data/social_anxiety.csv") |> readr::read_csv()
+metal_tib <- here::here("data/metal_health.csv")  |> readr::read_csv()
+```
+
+## The Linear Model Process
+
+First, we should produce scatterplots to get some idea of whether the assumption of linearity is met, and to look for outliers or obvious unusual cases. Having done this initial screen for problems we fit a model and save the various diagnostic statistics that we discuss later. If we want to generalize our model beyond the sample, or we are interested in interpreting significance tests and confidence intervals then we examine these residuals to check for homoscedasticity, normality, independence and linearity. If we find problems then we take corrective action, which involves fitting a different model. If the problem is lack of linearity then we fit a non-linear model, for lack of independent errors we'd use a multilevel model, and in all other situations we fit a robust version of the model using either bootstrapping (small samples) or robust standard errors.
+
+This tutorial follows the example from (Field 2023) that looks at predicting physical, downloaded and streamed album sales (outcome variable) from various predictor variables. The data file has 200 rows, each one representing a different album. There are also several columns, one of which contains the sales (in thousands) of each album in the week after release (**sales**) and one containing the amount (in thousands of pounds/dollars/euro/whatever currency you use) spent promoting the album before release (**adverts**). The other columns represent how many times songs from the album were played on a prominent national radio station in the week before release (**airplay**), and the 'look' of the band out of 10 (**image**). The data are in a tibble called album_tib.
+
+## Visualizing Data
+
+We can visualise the data easily using the `GGally` package, which we met in `discovr_07`. When you want to plot continuous variables, the `ggscatmat()` function from this package produces a matrix of scatterplots (below the diagonal), distributions (along the diagonal) and the correlation coefficient (above the diagonal). It takes the general form:
+
+```         
+GGally::ggscatmat(my_tibble, columns = c("variable 1", " variable 2", " variable 3" …))
+```
+
+```{r}
+GGally::ggscatmat(album_tib, columns = c("sales", "adverts", "airplay", "image"))
+```
+
+Themes can be applied regularly
+
+Although the data are messy, the three predictors have reasonably linear relationships with the album sales and there are no obvious outliers (except maybe in the bottom left of the scatterplot with band image). Across the diagonal, we see the distributions of scores. Advertising is very skewed and airplay and sales look quite heavy-tailed.
+
+We can use the correlations in the plot to get a sense of the relationships between predictors and the outcome. If we look only at the predictors (ignore album sales) then the highest correlation is between the ratings of the bands image and the amount of airplay which is significant at the 0.01 level (*r* = 0.18). Focussing on the outcome variable, of all of the predictors, adverts and airplay correlate best with the outcome (*r*s = 0.58 and 0.6 respectively).
+
+```{r}
+GGally::ggscatmat(album_tib, columns = c("adverts", "airplay", "image", "sales")) +
+  theme_minimal()
+```
+
+## One Predictor
+
+To begin with we will predict sales from advertising alone. The model we're fitting is described by the following equation:
+
+Sales*i =* b0 + b1Advertisingi + *E1*
+
+To fit a linear model we use the `lm()` function. This function takes the general form:
+
+```         
+my_model <- lm(outcome ~ predictor(s), data = tibble, na.action = an action)
+```
+
+In which my_model is whatever name you choose to give to the model, outcome is the name of the outcome variable (in our example **sales**), and predictor is the name of the predictor variable (in our example **adverts**) or, as we shall see, is a list of variables separated by + symbols. We can also specify a way to handle missing values and tibble is the name of the tibble containing the data (in our example album_tib).
+
+### Extracting Model Information With Summary()
+
+There are different ways to inspect the model we have just fitted. The bread and butter way is to use the `summary()` function, into which we place the name of model that we just created (album_lm):
+
+```{r}
+album_lm <- lm(sales ~ adverts, data = album_tib, na.action = na.exclude)
+summary(album_lm)
+```
+
+If you like tidier output, the `broom` package comes in handy. This package has functions that extract the key information from models, place this information in a tibble, and print it in a nice table. It has two main functions:
+
+-   The `glance()` function extracts the overall model fit statistics.
+
+-   The `tidy()` function extracts the model parameters.
+
+### Rounding within tables differently
+
+we can round different columns to different numbers of decimal places by using:
+
+```         
+broom::glance(album_lm) |>    
+  knitr::kable(digits = c(dp_for_column_1, dp_for_column_2, dp_for_column_3 ... dp_for_last_column))
+```
+
+Replacing dp_for_column_1 with a number indicating the number of decimal places for column 1 and so on for the other columns.
+
+### Overall Fit of the Model
+
+To get overall model fit statistics we place our model (album_lm) into `glance()`.
+
+```{r}
+broom::glance(album_lm) |> 
+  knitr::kable(digits = 3)
+```
+
+**What does the value of R\^2 in the table tell us?**
+
+Advertising expenditure and album sales have a correlation of 0.335
+
+33.5% of the variation in album sales cannot be accounted for by advertising expenditure
+
+[Advertising expenditure accounts for 33.5% of the variation in album sales]{.underline}
+
+Advertising expenditure accounts for 0.335% of the variation in album sales
+
+```{r}
+broom::glance(album_lm)
+```
+
+It also reports an *F*-statistic (labelled **statistic**) and its *p*-value (labelled (**p.value**). The output shows the results of this comparison. Note that the value of *F* is 99.59 and the value in column labelled **p.value** is 2.94198e-19. The degrees of freedom for the *F* are 1 (as shown in the variable **df**) and 198 (as shown in the variable **df.residual**). Therefore, we can say that adding the predictor of **advertising** significantly improved the fit of the model to the data compared to having no predictors in the model, *F*(1, 198) = 99.59, *p* \< .001. In other words, adding advertising as a predictor significantly improved the model fit.
+
+### Model Parameters
+
+To see the model parameters we can use `broom::tidy()`, which takes the general form
+
+```         
+broom::tidy(model_name, conf.int = FALSE, conf.level = 0.95)
+```
+
+```{r}
+broom::tidy(album_lm, conf.int = TRUE)  %>% 
+  knitr::kable(digits = 3)
+```
+
+The output provides estimates of the model parameters (the b\^-values) and the significance of these values. The *Y* intercept (b\^0) is 134.14. This value can be interpreted as meaning that when no money is spent on advertising (when *X* = 0), the model predicts that 134,140 albums will be sold (remember that our unit of measurement is thousands of albums). The value of b\^1 is 0.096. This value represents the change in the outcome associated with a unit change in the predictor. In other words, if our predictor variable is increased by one unit (if the advertising budget is increased by 1), then our model predicts that 0.096 extra albums will be sold. Our units of measurement were thousands of pounds and thousands of albums sold, so we can say that for an increase in advertising of £1000 the model predicts 0.096 × 1000 = 96) extra album sales. This investment is pretty useless for the record company: it invests £1000 and gets only 96 extra sales! Fortunately, as we already know, advertising accounts for only one-third of the variance in album sales.
+
+If a predictor is having a significant impact on our ability to predict the outcome then its b\^should be different from 0 (and large relative to its standard error). The *t*-test (labelled **statistic**) and associated *p*-value tell us whether the b\^value is significantly different from 0. The column **p.value** contains the exact probability that a value of *t* at least as big as the one in the table would occur if the value of *b* in the population were zero. If this probability is less than 0.05, then people interpret that as the predictor being a significant predictor of the outcome. For both *t*s, the probabilities are given in scientific notation. For example for the effect of adverts the *p* is `2.91e-19`.
+
+With respect the values in the column **p.value**, it means that both values are zero to 3 decimal places (0.000), and so the probability of the *t* values (or larger) occurring if the values of *b* in the population were zero is less than 0.001. In other words, the *b*s are significantly different from 0. In the case of the *b* for advertising budget this result means that the advertising budget makes a significant contribution (*p* \< 0.001) to predicting album sales.
+
+### Exploring the Standard Error of b\^
+
+**If a *b*-value has a large standard error what can we conclude?**
+
+[That estimates of *b* vary widely across different samples. (Therefore, this estimate *could* be very different from the population value.)]{.underline}
+
+The estimate of *b* in our sample is bigger than most other samples.
+
+That estimates of *b* vary little across different samples. (Therefore, this estimate is likley to be very similar to the population value.)
+
+The sampling distribution of *b* is narrow.
+
+### Confidence Intervals for b\^
+
+A bit of revision. Imagine that we collected 100 samples of data measuring the same variables as our current model. For each sample we estimate the same model that we have in this chapter, including confidence intervals for the unstandardized beta values. These boundaries are constructed such that in 95% of samples they contain the population value of *b*. Therefore, 95 of our 100 samples will yield confidence intervals for b that contain the population value. The trouble is that we don't know if our sample is one of the 95% with confidence intervals containing the population values or one of the 5% that misses.
+
+The typical pragmatic solution to this problem is to assume that your sample is one of the 95% that hits the population value. If you assume this, then you can reasonably interpret the confidence interval as providing information about the population value of *b*. A narrow confidence interval suggests that all samples would yield estimates of *b* that are fairly close to the population value, whereas wide intervals suggest a lot of uncertainty about what the population value of *b* might be. If the interval contains zero then it suggests that the population value of *b* might be zero -- in other words, no relationship between that predictor and the outcome---and could be positive but might be negative. All of these statements are reasonable if you're prepared to believe that your sample is one of the 95% for which the intervals contain the population value. Your belief will be wrong 5% of the time, though.
+
+Looking at the 95% confidence interval for advertising (reproduced above), if our sample is one of the 95% producing confidence intervals that contain the population value then the confidence interval tells us that the population value of b for advertising budget is likely to fall between 0.077 and 0.115 and because this interval doesn't include zero we might conclude that there is a genuine positive relationship between advertising budget and album sales in the population.
+
+### Using the Model
+
+![](images/Screenshot%202023-11-01%20202921.png)
+
+## Several Predictors
+
+Let's extend the model to include airplay and the band's image as additional predictors. The executive has past research indicating that advertising budget is a significant predictor of album sales, and so the new predictors (airplay and attract) should be entered into the model *after* advertising budget. This method is *hierarchical* (the researcher decides in which order to enter variables into the model based on past research). The model we're fitting is described by the following equation:
+
+![](images/Screenshot%202023-11-02%20141111.png)
+
+### Building the Model
+
+We already have fitted a model predicting sales from advertising that is stored in album_lm. Were now going to create a second model that builds upon this model by adding airplay and image as predictors. In other words, were building the model in the equation above.
+
+To create this second model, we need to specify additional predictor variables in the same way that we add predictors to the equation itself: we use + to add them into the model. So we change the formula within `lm()` from sales \~ adverts to sales \~ adverts + airplay + image. Note that the formula we use within `lm()` maps directly to the equation for the model but excludes the *b*s and the error term.
+
+```{r}
+album_full_lm <- lm(sales ~ adverts + airplay + image, data = album_tib, na.action = na.exclude)
+
+
+```
+
+### Fit Statistics
+
+As with our earlier model, we can obtain the (nicely formatted) fit statistics by placing the name of our model into `glance()`
+
+```{r}
+broom::glance(album_full_lm)  |> 
+  knitr::kable(digits = 3)
+```
+
+As before, the variable **r.square** tells us the value of R\^2. Remember that for the first model its value was 0.335, which we interpreted as advertising budget accounting for 33.5% of the variation in album sales. When the two new predictors are included, this value increases to 0.665 or 66.5% of the variance in album sales. If advertising accounts for 33.5%, then the change in R\^2 is R\^2change = 0.665 −− 0.335 = 0.33. In other words, image and airplay account for an additional 33% of the variance in sales.
+
+The adjusted R\^2 (**adj.r.squared**) gives us some idea of how well our model generalizes and ideally we'd like its value to be the same as, or very close to, the value of R\^2. In this example the difference for the final model is small (it is 0.665 −− 0.66 = 0.005 or about 0.5%). This shrinkage means that if the model were derived from the population rather than a sample we'd conclude that it accounted for approximately 0.5% less variance in the outcome.
+
+**How might we interpret the statistic and p.value in the table (assume** α=0.05?)
+
+[The linear model accounts for a significant amount of the variance in album sales]{.underline}
+
+The linear model is a poor fit of the data
+
+The error in the model is greater than the variance in album sales that it explains\
+\
+*Because the p-value associated with F is less than 0.05 most people would conclude that the model makes a significant improvement to predicting album sales.*
+
+The variable **statistic** contains the *F*-statistic. The *F*-statistic represents the ratio of the improvement in prediction that results from fitting the model, relative to the inaccuracy that still exists in the model. The variable **p.value** contains the *p*-value associated with *F*, which in this case is 2.88×10e−46, in other words a lot smaller than 0.001. The degrees of freedom for the *F*-statistic are (in terms of these variables) **df** and **df.residual**, so we could report *F*(3, 196) = 129.50, *p* \< 0.001. We can interpret this result as meaning that the model significantly improves our ability to predict the outcome variable compared to not fitting the model.
+
+### Comparing Models
+
+We can compare hierarchical models using an *F*-statistic using the `anova()` function, which takes the general form:
+
+```         
+anova(model_1, model_2, … , model_n)
+```
+
+We can only compare hierarchical models; that is to say that the second model must contain everything that was in the first model plus something new, and the third model must contain everything in the second model plus something new, and so on.
+
+```{r}
+anova(album_lm, album_full_lm)  |> 
+  broom::tidy()
+```
+
+The value of *F* is 96.45 (**statistic**) and the corresponding *p* (**p.value**) is 6.8793949\^{-30} (i.e., 6.88 ×10−30). The degrees of freedom for this *F* are the difference in the degrees of freedom between the two models (in this case 2 as shown in the variable **df**) and the degrees of freedom for the newer model (in this case 196 as shown in the variable **df.residual**). Therefore, we can say that adding the predictors of image and airplay (album_full_lm) significantly improved the fit of the model to the data compared to having only advertising as a predictor (album_lm), *F*(2, 196) = 96.45, *p* \< 0.001. In other words, adding airplay and image as predictors significantly improved the model fit.
+
+### Model Parameter Estimates (b\^)
+
+As with our earlier model, we can obtain the parameter estimates and their confidence intervals as text by executing `summary(album_full_lm)` but it's better to use `broom::tidy()` to get a nicely formatted table:
+
+```{r}
+broom::tidy(album_full_lm, conf.int = TRUE)  |> 
+  knitr::kable(digits = 3)
+```
+
+The output gives us estimates for the *b*-values (column labelled **estimate**) and statistics that indicate the individual contribution of each predictor to the model. The b\^-values can be used to interpret the relationship between album sales and each predictor. All three predictors have positive b\^-values indicating positive relationships. So, as advertising budget increases, album sales increase; as plays on the radio increase, so do album sales; and finally more attractive bands will sell more albums. The b\^-values tell us more than this, though. They tell us to what degree each predictor affects the outcome if the effects of all other predictors are held constant.
+
+**How would we interpret the** b\^ (11.086) for band image?
+
+[If a band can increase their image rating by 1 unit they can expect additional album sales of 11,086 units]{.underline}
+
+Band image explains 11.086% of the variance in album sales
+
+If a band can increase their image rating by 1 unit they can expect additional album sales of 11.086 units
+
+A band rated one standard deviation higher on the image scale can expect additional album sales of 11.086 standard deviations\
+\
+*Although the* b*\^ is 11.086 the units were thousands of albums, which is why this answer is correct.*
+
+We've looked at the band's image, but for the other two predictors:
+
+-   Advertising budget: b\^ = 0.085 indicates that as advertising budget increases by one unit, album sales increase by 0.085 units. Both variables were measured in thousands; therefore, for every £1000 more spent on advertising, an extra 0.085 thousand albums (85 albums) are sold. This interpretation is true only if the effects of band image and airplay are held constant.
+
+-   Airplay: b\^ = 3.367 indicates that as the number of plays on radio in the week before release increases by one, album sales increase by 3.367 units. Every additional play of a song on radio (in the week before release) is associated with an extra 3.367 thousand albums (3367 albums) being sold. This interpretation is true only if the effects of the bands image and advertising budget are held constant.
+
+### Standardized betas(b\^s)
+
+The `lm()` function does not produce standardized betas but you can get them using the `model_parameters()` function from the `parameters` package, which takes the general form:
+
+```         
+parameters::model_parameters(my_model, standardize = NULL)
+```
+
+To get standardized b\^s we need to change the standardize argument from its default value of NULL to "refit".
+
+```{r}
+parameters::model_parameters(album_full_lm, standardize = "refit")  |> 
+  knitr::kable(digits = 3)
+```
+
+**How would we interpret the *Standardized B* (0.512) for airplay?**
+
+The correlation between airplay and album sales is 0.512
+
+*As the number of plays on radio in the week before release increases by 1 standard deviation, album sales increase by 0.512 standard deviations*
+
+As the number of plays on radio in the week before release increases by 1 unit, album sales increase by 0.512 units
+
+As the number of plays on radio in the week before release increases by 0.512 standard deviation, album sales increase by 1 standard deviations
+
+Let's summarize the values for the remaining predictors:
+
+-   Advertising budget: Standardized β\^ = 0.511 indicates that as advertising budget increases by one standard deviation (£485,655), album sales increase by 0.511 standard deviations. The standard deviation for album sales is 80,699, so this constitutes a change of 41,240 sales (0.511 × 80,699). Therefore, for every £485,655 more spent on advertising, an extra 41,240 albums are sold. This interpretation is true only if the effects of the bands image and airplay are held constant.
+
+-   Image: Standardized β\^ = 0.192 indicates that a band rated one standard deviation (1.40 units) higher on the image scale can expect additional album sales of 0.192 standard deviations units. This is a change of 15,490 sales (0.192 × 80,699). A band with an image rating 1.40 higher than another band can expect 15,490 additional sales. This interpretation is true only if the effects of airplay and advertising are held constant.
+
+```{r}
+sd(album_tib$adverts)
+sd(album_tib$airplay)
+sd(album_tib$image)
+sd(album_tib$sales)
+```
+
+### Confidence Intervals
+
+The output also contains the confidence intervals for each model parameter estimate (b\^).
+
+```{r}
+broom::tidy(album_full_lm, conf.int = TRUE)  |> 
+  knitr::kable(digits = 3)
+```
+
+**The confidence interval for airplay ranges from 2.82 to 3.92. What does this tell us?**
+
+[If this confidence interval is one of the 95% that contains the population value then the population value of *b* lies between 2.82 and 3.92.]{.underline}
+
+I can be 95% confident that the population value of *b* lies between 2.82 and 3.92
+
+The probability of this confidence interval containing the population value is 0.95.
+
+There is a 95% chance that the population value of *b* lies between 2.82 and 3.92
+
+For the remaining predictors the confidence intervals tell us that **assuming that each confidence interval is one of the 95% that contains the population parameter**:
+
+-   The true size of the relationship between advertising budget and album sales lies somewhere between 0.071 and 0.099.
+
+-   The true size of the relationship between band image and album sales lies somewhere between 6.279 and 15.894.
+
+The two best predictors (advertising and airplay) have very tight confidence intervals indicating that the estimates for the current model are likely to be representative of the true population values. The interval for the bands image is wider (but still does not cross zero) indicating that the parameter for this variable is less representative, but nevertheless significant.
+
+### Significance Tests
+
+The values in **statistic** are the values of *t* associated with each b\^ and **p.value** is the associated significance of the *t*-statistic. For every predictor the b\^ is significantly different from 0 (*p* \< .001), meaning that all predictors significantly predict album sales.
+
+```{r}
+broom::tidy(album_full_lm, conf.int = TRUE)  |> 
+  knitr::kable(digits = 3)
+```
+
+**How might we interpret the statistic** and **p.value** for the three predictors?
+
+[They tell us that the probability of getting a value of *t* at least as big as these values if the value of *b* were, in fact, zero is smaller than 0.001 for all predictors.]{.underline}
+
+The probability that each *b* is a chance result is less than 0.001
+
+The probability of the null hypothesis is less than 0.001 in all cases
+
+The *p*-values in the table all tell us the long-run probability that we would get a a value of *t* at least as large as the ones we have if the the true relationship between each predictor and album sales was 0 (i.e., *b* = 0). In all cases the probabilities are less than 0.001, which researchers would generally take to mean that the observed b\^s are significantly different from zero. Given the b\^s quantify the relationship between each predictor and album sales, this conclusion implies that each predictor significantly predicts album sales.
+
+### Report
+
+The model that included the band's image and airplay was a significantly better fit than the model that included advertising budget alone, *F*(2, 196) = 96.45, *p* \< 0.001. The final model explained 66.5% of the variance in album sales. Advertising budget significantly predicted album sales b\^ = 0.08 \[0.07, 0.10\], *t*(196) = 12.26, *p* \< 0.001, as did airplay b\^ = 3.37 \[2.82, 3.92\], *t*(196) = 12.12, *p* \< 0.001 and image, b\^ = 11.09 \[6.28, 15.89\], *t*(196) = 4.55, *p* \< 0.001.
+
+## Unguided Examples
+
+(Lacourse, Claes, and Villeneuve 2001) conducted a study to see whether suicide risk was related to listening to heavy metal music. They devised a scale to measure preference for bands falling into the category of heavy metal. This scale included heavy metal bands (Black Sabbath, [Iron Maiden](https://ironmaiden.com/)), speed metal bands ([Slayer](https://www.slayer.net/), [Metallica](https://www.metallica.com/)), death/black metal bands (Obituary, Burzum) and gothic bands (Marilyn Manson, Sisters of Mercy). They then used this (and other variables) as predictors of suicide risk based on a scale measuring suicidal ideation etc.
+
+Data are in the tibble metal_tib are from a fictitious replication. There are two variables representing scores on the scales described above: **hm** (the extent to which the person listens to heavy metal music) and **suicide** (the extent to which someone has suicidal ideation and so on).
+
+### Metal and Mental Health
+
+Use the code box below to fit a model (call it metal_lm) to predict suicide risk from love of heavy metal and to answer the questions below.
+
+```{r}
+metal_lm <- lm(suicide ~ hm, data = metal_tib, na.action = na.exclude)
+
+broom::glance(metal_lm) |> 
+  knitr::kable(digits = 3)
+broom::tidy(metal_lm, conf.int = TRUE) |> 
+  knitr::kable(digits = 3)
+```
+
+**How much variance does the final model explain?**
+
+[12.5%]{.underline}
+
+35.3%
+
+None of these values
+
+0.125
+
+**What is the nature of the relationship between listening to heavy metal and suicide risk?**
+
+As love of heavy metal increases, suicide risk also increases
+
+As love of heavy metal increases, suicide risk doesn't change
+
+[As love of heavy metal increases, suicide risk decreases]{.underline}\
+\
+*Yes, because the* b\^ *value is negative*
+
+**As listening to heavy metal increases by 1 unit, by how much does suicide risk change?**
+
+0.353 units
+
+[-0.612 units]{.underline}
+
+0.612 units
+
+-0.353 units
+
+### Predicting Social Anxiety
+
+In this example well look at data collected from several questionnaires relating to clinical psychology, and we will use these measures to predict social anxiety. Anxiety disorders take on different shapes and forms, and each disorder is believed to be distinct and have unique causes. We can summarize the disorders and some popular theories as follows:
+
+-   Social Anxiety: Social anxiety disorder is a marked and persistent fear of 1 or more social or performance situations in which the person is exposed to unfamiliar people or possible scrutiny by others. This anxiety leads to avoidance of these situations. People with social phobia are believed to feel elevated feelings of shame.
+
+-   Obsessive Compulsive Disorder (OCD): OCD is characterized by the everyday intrusion into conscious thinking of intense, repetitive, personally abhorrent, absurd and alien thoughts (Obsessions), leading to the endless repetition of specific acts or to the rehearsal of bizarre and irrational mental and behavioural rituals (compulsions).
+
+Social anxiety and obsessive compulsive disorder are seen as distinct disorders having different causes. However, there are some similarities. They both involve some kind of attentional bias: attention to bodily sensation in social anxiety and attention to things that could have negative consequences in OCD. They both involve repetitive thinking styles: social phobics ruminate about social encounters after the event (known as post-event processing), and people with OCD have recurring intrusive thoughts and images. They both involve safety behaviours (i.e. trying to avoid the thing that makes you anxious).
+
+This might lead us to think that, rather than being different disorders, they are manifestations of the same core processes (Field and Cartwright-Hatton 2008). One way to research this possibility would be to see whether social anxiety can be predicted from measures of other anxiety disorders. If social anxiety disorder and OCD are distinct we should expect that measures of OCD will not predict social anxiety. However, if there are core processes underlying all anxiety disorders, then measures of OCD should predict social anxiety. The data are in soc_anx_tib. This tibble contains three variables of interest to us:
+
+-   **spai**: The Social Phobia and Anxiety Inventory (SPAI), which measures levels of social anxiety.
+
+-   **obq**: Obsessive Beliefs Questionnaire (OBQ), which measures the degree to which people experience obsessive beliefs like those found in OCD.
+
+-   **tosca**: The Test of Self-Conscious Affect (TOSCA), which measures shame.
+
+Each of 134 people was administered all questionnaires. Fit a hierarchical linear model with two blocks:
+
+1.  Block 1: the first block (call it soc_anx_lm) will contain any predictors that we expect to predict social anxiety. In this example we have only one variable that we expect, theoretically, to predict social anxiety and that is shame (measured by the TOSCA).
+
+2.  Block 2: the second block (call it soc_anx_obq_lm) adds OBQ, the predictor variable that we don't necessarily expect to predict social anxiety.
+
+```{r}
+soc_anx_lm <- lm(spai ~ tosca, data = soc_anx_tib, na.action = na.exclude)
+soc_anx_obq_lm <- lm(spai ~ tosca + obq, data = soc_anx_tib, na.action = na.exclude)
+
+broom::glance(soc_anx_lm) |> 
+  knitr::kable(digits = 3)
+broom::glance(soc_anx_obq_lm) |> 
+  knitr::kable(digits = 3)
+
+# Doesn't render of left in
+#anova(soc_anx_lm, soc_anx_obq_lm) |> 
+  #broom::tidy() |> 
+  #knitr::kable(digits = 3)
+```
+
+This error is being thrown by the `anova()` function. The message implies that soc_anx_lm and soc_anx_obq_lm (the models we asked `anova()` to compare) have been fitted to datasets that are not the same size. This might seem odd: for both models we used the data in soc_anx_tib so surely they were fitted to the same sized data?
+
+We can see what's going on by executing the code in the box below. The code takes soc_anx_tib and, for each variable within, counts the number of cases that have a valid score and the number that are missing.
+
+```{r}
+soc_anx_tib |> 
+  dplyr::summarise(
+    across(.fns = list(valid = ~sum(!is.na(.x)), missing = ~sum(is.na(.x))), .names = "{.col}_{.fn}")
+  )
+```
+
+In the resulting output, the columns labelled with \_valid contain a count of the number of cases that have a value for each variable, and the corresponding column labelled with \_missing contains a count of number of cases that had a missing value. Notice that both **spai** and **tosca** have 134 cases with valid values and 0 with missing values, whereas for **obq** only 132 cases had values because 2 had missing values. These two missing values are the cause of the error message: the model soc_anx_lm is fitted using the full number of cases because it includes **spai** and **tosca**, which both have 134 cases. However, when we add **obq** to the model and fit soc_anx_obq_lm, the two cases with missing values for **obq** are dropped completely and this model is fitted on the remaining 132 cases. Hence, the two models are based on different numbers of cases and can't be compared.
+
+For now, the quick fix is to use listwise deletion, which is generally considered very bad practice indeed. If you're desperate to compare the two models, this would involve fitting the first model but using `na.omit()` to exclude the cases that are missing on **obq**:
+
+```         
+soc_anx_lm <- soc_anx_tib |>
+dplyr::select(-iii) |>
+na.omit() |>
+lm(spai ~ tosca, data = _)
+
+anova(soc_anx_lm, soc_anx_obq_lm) |>
+broom::tidy() |>
+knitr::kable(digits = 3)
+```
+
+Note that we take the data, deselect the variable **iii** (because it is not involved in either of the models and we don't want to omit the 5 cases that have missing values on this variable), then use `na.omit()` to remove any cases that have missing values on the remaining variables (this will remove the two cases that have missing values for **obq**). We pipe the modified data into `lm()` by assigning what comes through the pipe explicitly to the data argument with data = \_, fit the model as before, and compare it to soc_anx_obq_lm using `anova()`.
+
+```{r}
+soc_anx_lm <- soc_anx_tib |> 
+  dplyr::select(-iii) |>
+  na.omit() |> 
+  lm(spai ~ tosca, data = _)
+
+anova(soc_anx_lm, soc_anx_obq_lm) |> 
+  broom::tidy() |> 
+  knitr::kable(digits = 3)
+```
+
+Adding **obq** to the model significantly improves the fit.
+
+```{r}
+broom::glance(soc_anx_obq_lm) |> 
+  knitr::kable(digits = 3)
+broom:: tidy(soc_anx_obq_lm, conf.int = TRUE) |> 
+  knitr::kable(digits = 3)
+parameters::model_parameters(soc_anx_obq_lm, standardize = "refit") |> 
+  knitr::kable(digits = 3)
+```
+
+### Interpretation
+
+**How much variance in social anxiety do OCD and shame account for?**
+
+[14.8%]{.underline}
+
+0.15%
+
+11.22%
+
+None of these values
+
+**The confidence interval for shame ranges from 7.77 to 36.42. What does this tell us?**
+
+There is a 95% chance that the population value of *b* lies between 7.77 and 36.42
+
+I can be 95% confident that the population value of *b* lies between 7.77 and 36.42
+
+[If this confidence interval is one of the 95% that contains the population value then the population value of *b* lies between 7.77 and 36.42.]{.underline}
+
+The probability of this confidence interval containing the population value is 0.95.
+
+**As shame increases by 1 unit, by how much does social anxiety change?**
+
+[22.10 units]{.underline}
+
+-22.10 units
+
+0.261 units
+
+between 7.77 and 36.42 units
+
+**As OCD increases by 1 standard deviation, by how many standard deviations does social anxiety change?**
+
+[0.213]{.underline}
+
+Some other value
+
+0.261
+
+7.249
+
+**The *p*-value for OCD is 0.014, what does this mean?**
+
+The probability that *b* = 7.25 is a chance result is 0.014
+
+The probability that OCD does not predict social anxiety is 0.014
+
+I got a different *p*-value than 0.014
+
+[The probability of getting a value of *t* at least as big as 2.49 if the value of *b* were, in fact, zero is 0.014. I'm going to assume, therefore, that *b* isn't zero (i.e. OCD significantly predicts social anxiety.]{.underline}
+
+## The Beast Of Bias
+
+### Quiz
+
+**Which of these assumptions of the linear model is the most important**
+
+Normality of errors
+
+[Linearity and additivity]{.underline}
+
+Homoscedasticity
+
+Independent errors\
+\
+*This assumption is the most important because if it is not met then the phenomenon you're trying to model is not well represented by the model you are trying to fit*
+
+**Which of these assumptions of the linear model is the least important**
+
+Independent errors
+
+Homoscedasticity
+
+Linearity and additivity
+
+[Normality of errors]{.underline}\
+\
+*This assumption is the least important because even with non-normal errors the parameter estimates (using ordinary least squares methods) of the model will be unbiased (they match the expected population value) and optimal (they minimize the squared error).*
+
+**What does homoscedasticity mean?**
+
+The variance in errors from the (population) model is constant at all levels of the predictor variable(s)
+
+### Getting Diagnostic Plots
+
+We can use the `plot()` function to produce diagnostic plots from the model, which takes the general form:
+
+```         
+plot(my_model, which = numbers_of_the_plots_you_want)
+```
+
+```{r}
+plot(album_full_lm)
+```
+
+The `plot()` function can produce the six plots described below. By default, `plot()` displays plots 1, 2, 3 and 5.
+
+1.  The predicted values from the model (*x*-axis) against the residuals (*y*-axis). Use this plot to look for linearity and homoscedasticity.
+
+2.  A Q-Q plot of the standardized residuals. Use this plot to look for normality of residuals.
+
+3.  The predicted values from the model (*x*-axis) against the square root of the standardized residuals (*y*-axis). This is a variant of plot 1 and is used to look for linearity and homoscedasticity.
+
+4.  The case number (*x*-axis) against the Cooks distance (*y*-axis). This plot can help to identify influential cases (cases with large values for Cooks distance).
+
+5.  The leverage value for each case (*x*-axis) against the standardized residual (*y*-axis). This plot is used to identify influential cases and outliers. Leverage values indicate the influence of an individual case on the model and are related to Cook's distance.
+
+6.  The leverage value for each case (*x*-axis) against the corresponding Cooks distance (*y*-axis). This plot is used to identify influential cases and outliers.
+
+If we want to produce specific plots, we can use the which argument in conjunction with the number of the plot we want, or for several plots we can list them within `c()`. For example, to get plot 1 we would execute:
+
+```{r}
+plot(album_full_lm, which = 1)
+```
+
+```{r}
+plot(album_full_lm, which = c(1 : 6))
+```
+
+### Residual Plots
+
+We use residual plots (plots 1 and 3) to look for linearity and homoscedasticity. The Figure below (taken from Field (2023)) shows that we're looking for a random scatter of dots. Curvature in the plot indicates a lack of linearity, and a funnel shape (residuals that 'fan out') indicates heteroscedasticity. Curvature *and* a funnel shape indicates both non-linearity and heteroscedasticity. We can also use Q-Q plots to look for normality in residuals.
+
+![](images/dsr2_fig_06_29_pred_resid.png)
+
+```{r}
+plot(album_full_lm, which = c(1, 3) )
+```
+
+**Comparing the plot to those in Figure 2, how would you interpret it?**
+
+I can see a violation of linearity
+
+[I can't see any problems]{.underline}
+
+I can see a violation of homoscedasticity\
+\
+*The dots look like a random, evenly-dispersed pattern. No funnel shapes, no banana shapes, so all is fine.*
+
+```{r}
+plot(album_full_lm, which = 2)
+```
+
+**Based on the Q-Q plot, can we assume normality of the residuals?**
+
+Maybe
+
+[Yes]{.underline}
+
+No\
+\
+*The distribution is very normal: the dots on the Q-Q plot lie almost exactly along the diagonal, which indicates a normal distribution.*
+
+### Pretty Residual Plots
+
+With the `ggfortify` package loaded, you can use `ggplot2::autoplot()` to produce nicely formatted plots that are `ggplot2` objects, which means that you can add other `ggplot2` elements to them, such as themes.
+
+```{r}
+ggplot2::autoplot(album_full_lm, which = 1)
+```
+
+Themes can be added normally
+
+```{r}
+ggplot2::autoplot(album_full_lm, which = 1) +
+  theme_minimal()
+```
+
+`ggfortify` also adds some useful arguments to `autoplot()` that map onto aesthetics that we have met in earlier tutorials. As with any `ggplot2` plot we can change colours using [hex codes](https://www.color-hex.com/). Here's some properties that we can change within `autoplot()`:
+
+-   colour. Sets the colour of the points on the plot.
+
+-   smooth.colour. Set the colour of the trend line on the plots.
+
+-   size. Sets the size of the dots on the plot.
+
+-   alpha. Sets the transparency of the points on the plot (0 = invisible, 1 = solid)
+
+```{r}
+ggplot2::autoplot(album_full_lm,
+                  which = c(1, 3),
+                  colour = "#5c97bf",
+                  smooth.colour = "#ef4836",
+                  alpha = 0.5,
+                  size = 1) +
+  theme_minimal()
+```
+
+```{r}
+ggplot2::autoplot(album_full_lm,
+                  which = 2,
+                  colour = "#5c97bf",
+                  smooth.colour = "#ef4836",
+                  alpha = 0.5,
+                  size = 1) +
+  theme_minimal()
+```
+
+### **Influential cases and outliers: plots**
+
+As a bare minimum we should use Cook's distance to identify influential cases and standardized residuals to check for outliers.
+
+**Outliers and influence**
+
+-   In an average sample, 95% of standardized residuals should lie between ±1.96, 99% of standardized residuals should lie between ±2.58, and any case for which the absolute value of the standardized residual is 3 or more, is likely to be an outlier.
+
+-   Cook's distance measures the influence of a single case on the model as a whole. Absolute values greater than 1 may be cause for concern.
+
+A quick way to check for influential cases is to inspect the influence plots for the model, which we can obtain by selecting plots 4 to 6 from the `plot() / autoplot()` functions. 
+
+```{r}
+ggplot2::autoplot(album_full_lm,
+                  which = 4:6,
+                  colour = "#5c97bf",
+                  smooth.colour = "#ef4836",
+                  alpha = 0.5,
+                  size = 1) +
+  theme_minimal()
+```
+
+The first plot shows the value of Cooks distance for each case and labels cases with the largest values (cases 1, 164 and 169). Looking at the y-axis its easy to see that the largest values are in the region of 0.06, which is well below the threshold of 1. The second plot shows leverage values plotted against standardized residuals. We want the trend line (the solid red line) to be flat and lie along the zero, which is what we see in this plot. If the red line deviates substantially from the horizontal then it can indicate that one of the assumptions of the model has been violated. This plot also usually has red dashed lines indicating values of Cooks distance of 0.5 and 1. Notice that our plot has no dashed red lines, which is because all values of Cooks distance are well below these thresholds. The final plot shows leverage, Cooks distance and the standardized residual for each case on the same plot. It can be used to identify cases that have high leverage, high Cooks distance, large residual or some combination of the three. For example, across the plots case 164 has a standardized residual between -2.5 and -3 and the largest Cooks distance (although still only in the region of 0.07).
+
+### **Influential cases and outliers: numbers**
+
+For a more precise look, we can obtain values for Cooks distance and standardized residuals using `broom::augment()`. All we need to do is to pass our linear model object into this function and save the results as a new tibble. It's also useful to save the case number as a variable so that you can identify cases should you need to.
+
+To save the a set of diagnostic statistics (including Cook's value and standardized residuals) we create a new tibble called album_full_rsd (I tend to use the suffix \_rsd, short for residuals) by piping our model (album_full_lm) into `broom::augment()` to get the residuals and then into `tibble::rowid_to_column()` to create a variable that contains the row number. The *var = "case_no"* tells the function to name the variable containing the row numbers **case_no** (choose a different name if you like). The result is a tibble called album_full_rsd that contains the case number, the original data to which the model was fitted, and various diagnostic statistics.
+
+::: callout-important
+## De-bug: residuals with missing values
+
+If you have missing values in the data and used na.action = na.exclude when fitting the model, you must also tell `augment()` where to find the original data so that it can map the residuals to the original cases. In this example, had we had missing values we would have used:
+
+```         
+album_full_rsd <- broom::augment(album_full_lm, data = album_tib)
+```
+
+Or in a pipe:
+
+```         
+album_full_rsd <- album_full_lm |>    broom::augment(data = album_tib)
+```
+:::
+
+```{r}
+album_full_rsd <- album_full_lm |> 
+  broom::augment() |> 
+  tibble::rowid_to_column(var = "case_no")
+album_full_rsd
+```
+
+The standardized residuals are in a variable called **.std.resid**, the raw residuals are in **.resid** and the Cook's distances are in **.cooksd.**
+
+To see what percentage of standardized residuals fall outside of these limits we can simply filter the tibble containing the residuals such that we see only cases with a standardized residual that is less than −1.96 or greater than 1.96. To simplify this task we can use the `abs()` function within the filter to return the absolute value (ignores the plus or minus sign) of the residual. Doing so means that we can simply filter by values above 1.96 (or whatever threshold we want to use). 
+
+```{r}
+album_full_rsd |> 
+  dplyr::filter(abs(.std.resid) >= 1.96) |> 
+  dplyr::select(case_no, .std.resid, .resid) |> 
+  dplyr::arrange(.std.resid)
+```
+
+This code takes the tibble of residuals and pipes it into `filter()` where we set the criteria that the absolute value of the variable **.std.resid** must be greater or equal to 1.96 (thats what `abs(.std.resid) >= 1.96` does). To make the output more focussed we can (but don't have to) pipe the filtered tibble into `select()` and select only the case number, the standardized residual and the raw residual. Finally (and optionally) we pipe the tibble into `arrange()` to sort it by the size of **.std.resid**, so that the resulting table will list cases from the smallest standardized residual to the largest.
+
+For threshold 2.5
+
+```{r}
+album_full_rsd |> 
+  dplyr::filter(abs(.std.resid) >= 2.5) |> 
+  dplyr::select(case_no, .std.resid, .resid) |> 
+  dplyr::arrange(.std.resid)
+```
+
+For threshold 3.0
+
+```{r}
+album_full_rsd |> 
+  dplyr::filter(abs(.std.resid) >= 3.0) |> 
+  dplyr::select(case_no, .std.resid, .resid) |> 
+  dplyr::arrange(.std.resid)
+```
+
+Answer keeping in mind that there were a total of 200 cases
+
+**What percentage of cases have standardized residuals with absolute values greater than 1.96?**
+
+[6.5%]{.underline}
+
+0.06
+
+3%
+
+*13/200 \* 100%*
+
+**What percentage of cases have standardized residuals with absolute values greater than 2.5?**
+
+*1%*
+
+0.01
+
+2
+
+0.5%
+
+*2/200 \* 100%*
+
+**All things considered do you think there are outliers?**
+
+I'm struggling to care about this stuff.
+
+*No, the appropriate proportion of cases have standardized residuals in the expected range and no case has a value grossly exceeding 3.*
+
+Yes, there is a case with a standardized residual of 3.061.
+
+We can do something similar to look at Cook's distance. We could either filter the tibble to look at cases with Cook's distance greater than 1, or simply sort the tibble in descending order using `arrange()` which will show us the cases with the largest Cook's distances. Again, we could use `select()` so that we see only the Cook's values and case numbers.
+
+```{r}
+album_full_rsd |> 
+  dplyr::arrange(desc(.cooksd)) |> 
+  dplyr::select(case_no, .cooksd)
+```
+
+**Are there any Cook's distances greater than 1?**
+
+*No*
+
+Yes\
+\
+The fact there are no Cook's distances greater than 1 suggests that no cases are having undue influence on the model as a whole.
+
+## Robust Linear Models
+
+Our model appears, in most senses, to be both accurate for the sample and generalizable to the population. Sometimes this won't be the case. There are two things we might want to do: (1) test whether the parameter estimates have been biased, and (2) check whether confidence intervals and significance tests have been biased.
+
+### Robust Parameter Estimates
+
+To check the parameter estimates we can fit a robust model using the `robust::lmRob()` function. This function is used in the same way as `lm()`, so to get a robust version of our final model we can simply replace `lm()` with `lmRob()` in our earlier code. Unfortunately, we cant use any `broom` functions with `lmRob()`, so we get text output using `summary()`.
+
+```{r}
+album_full_rob <- lmRob(sales ~ adverts + airplay + image, data = album_tib, na.action = na.exclude)
+summary(album_full_rob)
+```
+
+The bottom of the output shows significance tests of bias. With the usual caveats about significance tests needing to be interpreted within the context of the sample size, these tests suggest that bias in the original model is not problematic (because the *p*-value for these tests are not significant). Mainly we want to compare the robust parameter estimates to the original ones. For adverts the original b\^ was 0.085 and the robust estimate is the same, for airplay the original b\^ was 3.37 and the robust one is 3.42 and for image the original b\^ was 11.09 and the robust estimate is 11.77. In short, the robust estimates are virtually identical to the originals suggesting the original model is unbiased.
+
+### Robust Confidence Intervals and Significance Tests
+
+To test whether confidence intervals and significance tests are biased we can estimate the model with standard errors designed for heteroscedastic residuals or if the sample size is small use a bootstrap. We can do both of these by placing the model in the `parameters::model_parameters()` function. You might recall that we used this function to standardize the parameter estimates. There are three arguments in this function that we didn't explore before that we'll look at now.
+
+We can obtain models based on robust standard errors by setting vcov = "method" and replacing "method" with the name of the method we want to use to compute the robust standard errors. For example, vcov = "HC3" will use the HC3 method (which is fine) and vcov = "HC4" will use the HC4 method (which some consider better than HC3). This code makes our model robust by implementing HC4 standard errors.
+
+```{r}
+parameters::model_parameters(album_full_lm, vcov = "HC4") |> 
+  knitr::kable(digits = 3)
+```
+
+Refit using HC3 method
+
+```{r}
+parameters::model_parameters(album_full_lm, vcov = "HC3") |> 
+  knitr::kable(digits = 3)
+```
+
+The output shows the resulting b\^ values, their robust standard errors, confidence intervals and *p*-values. Compare these with the non-robust versions from earlier. The values are not much different (mainly because our original model didn't seem to violate its assumptions); for example, the standard error for the b\^ for image has changed from 2.44 to 2.25, the associated *t*-statistic has changed from 4.55 to 4.93, and the confidence interval has changed from \[6.28, 15.89\] to \[6.65, 15.52\]. These changes are not dramatic, our interpretation of the model won't have changed. Nevertheless, this is a useful sensitivity analysis in that if a robust model yields basically the same values as the non-robust model then we know that the non-robust model has not been unduly biased. If the robust estimates are hugely different from the original estimates then use and report the robust versions. Fitting a robust model is a win-win.
+
+In small samples we might prefer to bootstrap the confidence intervals. We can do this by setting the bootstrap argument within `model_parameters()` to TRUE. By default, 1000 bootstrap samples are used, which is fine for most purposes. Therefore, we can bootstrap the model album_full_lm by executing:
+
+```{r}
+parameters::model_parameters(album_full_lm, bootstrap = TRUE) |> 
+  knitr::kable(digits = 3)
+```
+
+These bootstrap confidence intervals and significance values do not rely on assumptions of normality or homoscedasticity, so they give us an accurate estimate of the population value of *b* for each predictor (assuming our sample is one of the 95% with confidence intervals that contain the population value). Again, nothing has changed much from the original model (because the original model didn't violate any assumptions or have influential cases or outliers.)
+
+::: callout-note
+## Bootstrapping
+
+Because bootstrapping relies on random sampling from the data you will get slightly different estimates each time you bootstrap a model. This behaviour is normal and nothing to worry about.
+:::
+
+**Bootstrapping is a technique from which the sampling distribution of a statistic is estimated by ...**
+
+[Taking repeated samples (with replacement) from the data set.]{.underline}
+
+Taking repeated samples from the population.
+
+Tying my shoelaces together so that I fall over.
+
+Adjusting the standard error to compensate for heteroscedasticity.
+
+**The bootstrap confidence interval for image ranges from 6.66 to 15.23 (the values might not exactly match these). What does this tell us?**
+
+I can be 95% confident that the population value of *b* lies between 6.66 and 15.23.
+
+The probability of this confidence interval containing the population value is 0.95.
+
+*If this confidence interval is one of the 95% that contains the population value then the population value of b lies between 6.26 and 15.28.*
+
+There is a 95% chance that the population value of *b* lies between 6.66 and 15.23.
+
+**Which of these statements about bootstrap confidence intervals is not true?**
+
+Bootstrap confidence intervals do not assume a normal sampling distribution.
+
+[Bootstrap confidence intervals have the same values each time you compute them.]{.underline}
+
+Bootstrap confidence intervals are robust to violations of homoscedasticity.
+
+Bootstrap confidence intervals are most useful in small samples.\
+\
+*This statement is false. Because bootstrapping relies on repeated sampling, the results can vary slightly each time you implement the process.*
+
+## Unguided Examples
+
+Following on from the earlier unguided example about predicting social anxiety. To recap, the data are in the tibble soc_anx_tib, which contains three variables of interest to us:
+
+-   **spai**: The Social Phobia and Anxiety Inventory (SPAI), which measures levels of social anxiety.
+
+-   **obq**: Obsessive Beliefs Questionnaire (OBQ), which measures the degree to which people experience obsessive beliefs like those found in OCD.
+
+-   **tosca**: The Test of Self-Conscious Affect (TOSCA), which measures shame.
+
+In the previous unguided example, we fit a linear model that predicted social anxiety from shame (measured by the TOSCA) and obsessive beliefs (measured by OBQ). This model was stored as soc_anx_obq_lm.
+
+::: callout-important
+## Missing Values
+
+This data does have missing values so an explicit path to data is necessary in augment()
+:::
+
+1.  All plots
+2.  Creates table for residuals with case no.
+3.  filters std. res by \>= 1.96
+4.  filters std. res by \>= 2.5
+5.  filters std. res by \>= 3.0
+6.  Displays Cook's distances in descending order
+
+```{r}
+plot(soc_anx_obq_lm, which = 1:6)
+
+soc_anx_rsd <- soc_anx_obq_lm |> 
+  broom::augment(data = soc_anx_tib) |> 
+  tibble::rowid_to_column(var = "case_no")
+
+soc_anx_rsd |> 
+  dplyr::filter(abs(.std.resid) >= 1.96) |> 
+  dplyr::select(case_no, .std.resid, .resid) |> 
+  dplyr::arrange(.std.resid)
+
+soc_anx_rsd |> 
+  dplyr::filter(abs(.std.resid) >= 2.5) |> 
+  dplyr::select(case_no, .std.resid, .resid) |> 
+  dplyr::arrange(.std.resid)
+
+soc_anx_rsd |> 
+  dplyr::filter(abs(.std.resid) >= 3) |> 
+  dplyr::select(case_no, .std.resid, .resid) |> 
+  dplyr::arrange(.std.resid)
+
+soc_anx_rsd |> 
+  dplyr::arrange(desc(.cooksd)) |> 
+  dplyr::select(case_no, .cooksd)
+```
+
+**How would you interpret the plot of ZPRED vs ZRESID?**
+
+I can see a violation of homoscedasticity
+
+I can see a violation of linearity
+
+[I can't see any problems\
+]{.underline}\
+*The dots look like a random, evenly-dispersed pattern. No funnel shapes, no banana shapes, so all is fine.*
+
+**Can we assume normality of the residuals?**
+
+[Yes]{.underline}
+
+No
+
+Correct - well done!\
+\
+*The distribution is fairly normal: the dots in the P-P(Q-Q?) plot lie close to the diagonal.*
+
+To answer these questions remember that the effective sample size was 132 (*N* = 134 but there were 2 cases with missing values excluded).
+
+**What percentage of cases have standardized residuals with absolute values greater than 1.96?**
+
+[4.55%]{.underline}
+
+2.27%
+
+0.045
+
+*6/132 \* 100%*
+
+**What percentage of cases have standardized residuals with absolute values greater than 2.5?**
+
+[1.51%]{.underline}
+
+4.55%
+
+0.015
+
+*2/132 \* 100%*
+
+**All things considered do you think there are outliers?**
+
+Yes
+
+[No]{.underline}
+
+*The appropriate proportion of cases have standardized residuals in the expected range and no case has a value exceeding 3.*
+
+**Are there any Cook's distances greater than 1?**
+
+Yes
+
+[No]{.underline}\
+\
+*The fact there are no Cook's distances greater than 1 suggests that no cases are having undue influence on the model as a whole.*
+
+## Bayesian Approaches
+
+There are two things we might do: (1) compare models using Bayes factors; (2) estimate model parameters using Bayesian methods. In both cases, you can fit the models using either default priors, which set distributions that represent very diffuse prior beliefs, or subjective priors, which allow you to specify prior distributions reflecting specific beliefs about the model parameters.
+
+### Bayes Factors
+
+First, lets compare models using a Bayes factor using the `regressionBF()` function in the `BayesFactor` (Morey and Rouder 2022). Essentially, we want to compare models against each other hierarchically to see which model has the largest Bayes factor, and to evaluate the strength of evidence that this Bayes factor suggests that a particular model predicts the outcome better than the intercept alone (i.e. a model with no predictors). The function takes the general form
+
+```         
+model_bf <- BayesFactor::regressionBF(formula, rscaleCont = "medium", data = tibble)
+```
+
+This code creates an object called model_bf based on the same type of formula that we put into the `lm()` function to specify the model (so this should be familiar). The argument rscaleCont sets the scale of the prior distribution for the distribution for the standardized b\^s in the model. This argument can be set as a numeric value or using one of three pre-defined values. By default it is set to the pre-defined value of "medium", which corresponds to a value of 2/√4 or about 0.354
+
+```{r}
+album_bf <- BayesFactor::regressionBF(sales ~ adverts + airplay + image, rscaleCont = "medium", data = album_tib)
+album_bf
+```
+
+The output shows the Bayes factors for all the potential models that we could get from our three predictor variables (7 in total). Each model is compared to a model that includes only the intercept. All models have huge Bayes factors, which suggest that they all provide strong evidence for the hypothesis that the model predicts the outcome better than the intercept alone. The question then is which model is best? We can answer that by finding the model with the largest Bayes factor, which is model 7, the model that includes all three predictors.
+
+### Bayesian Parameter Estimates
+
+Knowing that model 7 is best (which concurs with our non-Bayesian model), we can estimate the parameters in this model using Bayesian methods using the `lmBF()` function, which has the same format as `regressionBF()`. The difference between the functions is that `lmBF()` fits only the model we specify in the formula and not all of the subordinate models.
+
+```{r}
+album_full_bf <- BayesFactor::lmBF(sales ~ adverts + airplay + image, rscaleCont = "medium", data = album_tib)
+album_full_bf
+```
+
+The results match those form the final model in the previous output, however, by estimating model 7 in isolation we can extract the b\^-values derived from Bayesian estimation and their credible intervals using the `posterior()` function.
+
+To do this we enter the name of the model we just created (album_full_bf) into the `posterior()` function in which we also set the number of iterations to 10000 (which is plenty). Samples are taken from the posterior distribution of the album_full_bf model and stored in an object which I have called album_full_post. Finally, we place the posterior samples into `summary()` to see a summary of them.
+
+```{r}
+album_full_post <- BayesFactor::posterior(album_full_bf, iterations = 10000)
+summary(album_full_post)
+```
+
+![](images/Bayes.png)
+
+The Bayesian estimate of b\^ can be found in the column labelled Mean. In my output (but yours might differ) values are 0.08 for advertising budget, 3.34 for airplay and 11.01 for image, compared to the values of 0.085, 3.37 and 11.09 from the non-Bayesian model. Most useful are the credible intervals for these parameters. If we want the 95% credible interval then we can read the values from the columns labelled 2.5% and 97.5% in the table of quantiles. Unlike confidence intervals, credible intervals contain the population value with a probability of 0.95 (95%). For advertising budget, therefore, there is a 95% probability that the population value of b\^ lies between 0.07 and 0.1, for airplay the population value is plausibly between 2.79 and 3.89, and for image it plausibly lies between 6.14 and 15.72. These intervals are constructed assuming that an effect exists, so you cannot use them to test the hypothesis that the null is exactly 0, only to establish plausible population values of the *b*s in the model.

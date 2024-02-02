@@ -1,0 +1,679 @@
+---
+title: "DiscovR_14"
+author: "Ferdinand Edward Bitan"
+format: 
+  html:
+    self-contained: true
+    theme: darkly
+    toc: true
+    code-fold: true
+knitr: 
+  opts_chunk: 
+    warning: false
+    message: false
+editor: visual
+---
+
+# DiscovR_14
+
+## Libraries
+
+```{r}
+library(broom)
+library(broom.mixed)
+library(datawizard)
+library(here)
+library(interactions)
+library(lme4)
+library(lmerTest)
+library(modelbased)
+library(tidyverse)
+```
+
+## Data
+
+```{r}
+cosmetic_tib <- here::here("data/cosmetic.csv") |>
+  readr::read_csv() |>
+    dplyr::mutate(
+      clinic = forcats::as_factor(clinic) |> forcats::fct_relevel(paste("Clinic", seq(1, 20, 1))),
+      reason = forcats::as_factor(reason) |> forcats::fct_relevel("Change appearance")
+  )
+```
+
+## Cosmetic Surgery
+
+In my book I describe an example about the effects of cosmetic surgery on quality of life. The data are in cosmetic_tib, which has the following variables:
+
+-   **id**: the participant's code
+
+-   **post_qol**: This is the outcome variable and it measures quality of life after cosmetic surgery from 0 to 100%.
+
+-   **base_qol**: quality of life before cosmetic surgery.
+
+-   **days**: The number of days after surgery that post-surgery quality of life was measured.
+
+-   **clinic**: which of 21 clinics the person attended to have their surgery.
+
+-   **bdi**: This variable measures levels of depression using the Beck Depression Inventory (BDI).
+
+-   **reason**: This variable specifies whether the person had surgery purely to change their appearance or because of a physical reason.
+
+```{r}
+cosmetic_tib
+```
+
+## Preparing Categorical Variables
+
+In these tutorials I tend to be kind to you and set up categorical predictors in the datasets in a way that categories are coded conveniently for the hypotheses being tested. Real life is often not as kind as I am. It's always a good idea to check explicitly that factor levels are ordered how you want them to be. This optional section gives you practice at doing this.
+
+### The factor() and as_factor() Functions
+
+First, let's explore the potential confusion created by the different behaviour of the `as_factor()` and `factor()` functions. In my book I use the `as_factor()` function from `forcats` (see discovr_01), but sooner or later you will come across the `factor()` function in base R and you might want to use it. However, the functions behave differently as we'll now demonstrate.
+
+First, we will create a character variable with two values (`c("Silver", "Gold")`), convert it to a factor with `factor()` and inspect the levels using `levels()`. The code below does this, execute it and see what happens.
+
+```{r}
+c("Silver", "Gold") |>
+  factor() |> 
+  levels()
+```
+
+Note that levels have been assigned alphabetically: the first level is 'Gold' and the second level is 'Silver'. Let's repeat the exercise but change `factor()` to `forcats::as_factor()`.
+
+```{r}
+c("Silver", "Gold") |>
+  forcats::as_factor() |> 
+  levels()
+```
+
+Note that levels have been assigned in the order of the data, so the first level is 'Silver' and the second level is 'Gold'.
+
+In short, when converting character variables to factors the `as_factor()` function assigned levels in the order that it discovers them in the data, but the `factor()` function assigns them alphabetically. If the variable is not arranged alphabetically then the resulting factors will have differently ordered levels. The moral here is never assume that you know the order of factor levels!
+
+## Reordering Factor Levels
+
+Way back in discovr_01 we met the `fct_relevel()` function from the `forcats` package. Let's refresh our memories. The function takes this general form:
+
+```         
+fct_relevel(name_of_factor, levels_to_move, after = 0)
+```
+
+So you place the name of the factor that you want to relevel, then list any levels you want to move and use after = to say which level you want them placed after. By default after = 0, which means that the specified level is made the first level (it is moved to the beginning).
+
+For the **reason** factor, for example we could move the level labelled "Physical reason" to be the last level using either of these chunks of code
+
+```         
+cosmetic_evil_tib <- cosmetic_evil_tib |>   
+  dplyr::mutate(     
+    reason = forcats::fct_relevel(reason, "Change appearance")   
+    )  
+cosmetic_evil_tib <- cosmetic_evil_tib |>   
+  dplyr::mutate(     
+    reason = forcats::fct_relevel(reason, "Physical reason", after = Inf)   
+    )
+```
+
+In both blocks of code we recreate `cosmetic_evil_tib` using `mutate` to copy over the existing variable **reason** with a version of itself that has the reordered factor levels. In the first pipe we achieve the reordering by using the default option, which is to set the specified level as the first level. The code, therefore, sets "Change appearance" as level 1. The second block of code uses after = Inf (Inf is short for infinite) to move "Physical reason" to the final level (whatever that may be). This second method is particularly useful when you want to move a level to the end but you don't know how many levels there are off the top of your head. Both blocks of code have the same effect: they set the levels to be ordered as physical reason and change appearance.
+
+When you specify levels of a factor the text must exactly match that of the variable level. In the example above if you type "physical reason" or "Physicalreason" the command will fail because neither exactly match the factor level of "Physical reason". Check that upper and lower case letters match with the factor level and the spaces are correct.
+
+An alternative is to list the levels in the order you want them, we will need to use this method for the variable **clinic** because there are so many levels.
+
+```         
+cosmetic_evil_tib <- cosmetic_evil_tib |>   
+  dplyr::mutate(     
+    clinic = forcats::fct_relevel(clinic, "Clinic 1", "Clinic 2", "Clinic 3", "Clinic 4", "Clinic 5", "Clinic 6", "Clinic 7", "Clinic 8", "Clinic 9", "Clinic 10", "Clinic 11", "Clinic 12", "Clinic 13", "Clinic 14", "Clinic 15", "Clinic 16", "Clinic 17", "Clinic 18", "Clinic 19", "Clinic 20")   
+    )
+```
+
+The code above is inefficient: it's time consuming to write out all 20 levels. We can make it more efficient by using the `paste()` function to create the levels (see the tip box). The resulting code is
+
+```         
+cosmetic_evil_tib <- cosmetic_evil_tib |>   
+  dplyr::mutate(     
+    clinic = forcats::fct_relevel(clinic, paste("Clinic", 1:20))   
+    )
+```
+
+**Tip: generating sequences of text and numbers**
+
+The levels of **clinic** have a common pattern. They are the word "Clinic" (with an upper-case C), then a space, then a number. In we can create a sequence of integers using the code `start:stop` in which `start` is the first integer and `stop` is the last. For example, `1:20` creates the sequence 1, 2, 3, 4, 5, 6, 7, ..., 19, 20. The `paste()` function pastes things together putting a space between them. So `paste("Clinic", 1)` creates the string "Clinic 1". If we ask `paste()` to combine a word with a sequence of numbers then it creates a sequence of the word pasted to each of the numbers in turn.
+
+```         
+paste("Clinic", 1:20)
+```
+
+```         
+##  [1] "Clinic 1"  "Clinic 2"  "Clinic 3"  "Clinic 4"  "Clinic 5"  "Clinic 6"  ##  [7] "Clinic 7"  "Clinic 8"  "Clinic 9"  "Clinic 10" "Clinic 11" "Clinic 12" ## [13] "Clinic 13" "Clinic 14" "Clinic 15" "Clinic 16" "Clinic 17" "Clinic 18" ## [19] "Clinic 19" "Clinic 20"
+```
+
+We can use this code to create the 20 factor levels efficiently.
+
+Together, the code would be:
+
+```{r}
+#cosmetic_evil_tib  <- cosmetic_evil_tib %>% 
+#  dplyr::mutate(
+#    clinic = forcats::fct_relevel(clinic, paste("Clinic", 1: 20)),
+#    reason = forcats::fct_relevel(reason, "Change appearance")
+#)
+
+#levels(cosmetic_evil_tib$clinic)
+#levels(cosmetic_evil_tib$reason)
+```
+
+## The Model
+
+![](images/Screenshot%202023-11-16%20104336.png)
+
+![](images/surgery_data_hierarchy_small.png)
+
+## Exploring Data
+
+### Visualizing the Data
+
+Let's plot the data by recreating the image from the book. The code is
+
+```         
+ggplot2::ggplot(cosmetic_tib, aes(days, post_qol)) +
+  geom_point(alpha = 0.5, size = 1) +
+  geom_smooth(method = "lm", size = 0.5) +
+  coord_cartesian(xlim = c(0, 400), ylim = c(0, 100)) +
+  scale_y_continuous(breaks = seq(0, 100, 10)) +
+  labs(x = "Days post surgery", y = "Quality of life after surgery (%)") +
+  facet_wrap(~ clinic, ncol = 4) +
+  theme_minimal()
+```
+
+Let's break this code down
+
+-   The first line is a standard `ggplot()` command within which we define the data as being in cosmetic_tib. Then within `aes()` we plot **days** on the *x*-axis, **post_qol** on the *y*-axis.
+
+-   Next we use `geom_point()` to add the raw data as points (of size 1 and transparency 0.5).
+
+-   The third line uses `geom_smooth()` to plot a line of the relationship between **days** and **post_qol**. We set the line size to 0.5.
+
+-   The next three lines should be familiar to you: they use `coord_cartesian()` to determine the limits of the axes, `scale_y_continuous()` to set the tick intervals on the *y*-axis, and `labs()` to specify the axis labels.
+
+-   Next we use `facet_wrap()` to create separate plots for each clinic and to arrange them in 4 columns. \* Finally, we apply a minimal theme with `theme_minimal()`
+
+```{r}
+ggplot2::ggplot(cosmetic_tib, aes(days, post_qol)) +
+  geom_point(alpha = 0.5, size = 1) +
+  geom_smooth(method = "lm", size = 0.5) +
+  coord_cartesian(xlim = c(0, 400), ylim = c(0, 100)) +
+  scale_y_continuous(breaks = seq(0, 100, 10)) +
+  labs(x = "Days post surgery", y = "Quality of life after surgery (%)") +
+  facet_wrap(~ clinic, ncol = 4) +
+  theme_minimal()
+```
+
+### Summary Statistics
+
+We might want some summary statistics of quality of life scores split by **clinic**. We can create a basic table of descriptive statistics using by grouping the data by **clinic** and then passing it into the `describe_distribution()` function of the `datawizard` package.
+
+```         
+qol_sum <- cosmetic_tib |>   
+  dplyr::group_by(clinic) |>   
+  datawizard::describe_distribution(select = c("base_qol", "post_qol"), ci = 0.95)
+  
+qol_sum
+```
+
+In this code, we select the variables **base_qol** and **post_qol** and set the confidence interval to be 95%.
+
+```{r}
+qol_sum <- cosmetic_tib |> 
+  dplyr::group_by(clinic) |> 
+  datawizard::describe_distribution(select = c("base_qol", "post_qol"), ci = 0.95) |> 
+  knitr::kable(digits = 3)
+
+qol_sum
+```
+
+## Fitting Fixed Effect Models
+
+The next phase is to fit the model without the random effects to get a feel for the fit across contexts. The model we're fitting (which we saw earlier) is
+
+![](images/2.png)
+
+Bolker and colleagues (B. M. Bolker et al. (2009)) suggest fitting this model to the pooled data, and then within the individual levels of any contextual variables (in this case the clinics). In both cases we can use the `lm()` function, which we've used many times before, because there are no random effects.
+
+### Fit the Pooled Model
+
+```{r}
+pooled_lm <- lm(post_qol ~ days*reason + base_qol, data = cosmetic_tib)
+broom::tidy(pooled_lm, conf.int = TRUE)
+
+```
+
+We're interested in the parameter estimates to guide our expectations about what to expect in the model that includes the random effects. For example, the overall effect of **days** appears to be that for every extra day since surgery, quality of life increases by 0.009 units. This effect seems tiny, but how much would you expect quality of life to change in only 1 day? It's helpful to think about what this effect equates to over, say, 4 months (120 days) or a year (365 days). This effect equates to about a unit change in quality of life over 4 months and about 3 units over a year. In the context of a 100-point scale, this is not a huge change.
+
+### Fit the Model in Individual Clinics
+
+To fit the fixed-effects model within each clinic separately we could filter the data to include only a single clinic, fit the model, and repeat for the other 20 clinics. There is a more elegant way to achieve this using the `map()` function from the `purrr` package, which enables you to apply a function to multiple items simultaneously.
+
+We'll build up the code bit by bit. Ultimately, we're going to create an object called clinic_lms that contains the linear models for the 20 clinics. We start by piping the data (cosmetic_tib) into the `arrange()` function to order the data by the variable **clinic**. In doing so the rows of the data are sorted, in order, from clinic 1 to 20. This step isn't essential but if you are as anal-retentive as me it will stop you having palpitations when you look at the resulting table. Next, we use `group_by()` to group the output by the variable **clinic**. Finally (for now), we use `nest()` from the `tidyr` package to collapse the data within each clinic.
+
+```         
+clinic_lms <- cosmetic_tib  |>   
+  dplyr::arrange(clinic) |>    
+  dplyr::group_by(clinic)  |>     
+  tidyr::nest()
+```
+
+```{r}
+clinic_lms  <- cosmetic_tib |>
+  dplyr::arrange(clinic) |>
+  dplyr::group_by(clinic) |>
+  tidyr::nest()
+
+clinic_lms
+```
+
+Let's take stock of what you have created. You should see a tibble with 20 rows and two columns. The first column lists the clinics (in order because we ordered them) and the second column is labelled **data** and each row says \<tibble\>. This is because the `nest()` function has nested the data within each clinic. If we were to inspect the cell in the first row of the column labelled **data** we would find that it contains the clinic 1 data in a tibble. So, we have a tibble within a tibble. You can see this by executing the code in the box below, which instructs R to show us the first item (\[\[1\]\]) in the variable **data** within the object clinic_lms. Change the number in the square bracket to view a different row, for example `clinic_lms$data[[9]]` will show the 9th item in the variable **data** within the object clinic_lms, which you'll see is the data for clinic 9.
+
+```{r}
+clinic_lms$data[[1]]  
+```
+
+To sum up, the `nest()` function has enabled us to store individual tibbles (data sets) in a tabulated format, which means that we can now use `mutate()` to create new columns based on the individual data sets stored in the column called **data**.
+
+The next step is to create a new column called **model** that contains the results of fitting a linear model, using `lm()`, to the datasets within each clinic (which are stored in the column **data**). To do this we use the `map()` function from `purrr`, which has the following format
+
+```         
+purrr::map(.x = my_data, .f = a_function_I_want_to_apply_to_the_data)
+```
+
+In our example, we want to fit the model `lm(post_qol ~ days*reason + base_qol, data = my_data)` to each dataset stored in the variable called **data**. To do this we embed the following code, which takes advantage of something called a lambda function, within `mutate()`
+
+```         
+dplyr::mutate(
+  model = purrr::map(.x = data,
+  .f = \(clinic_tib) lm(post_qol ~ days*reason + base_qol, data = clinic_tib)))
+```
+
+Let's break this code down
+
+-   `.x = data` tells `map()` to use the **data** variable from the main tibble.
+
+-   `.f = \(clinic_tib)` creates a function that will be applied to the variable we specified as `.x` (in this case, the function will be applied to the variable **data** because we used `.x = data`). Notice that we've named the input of the function as clinic_tib to remind us that we're feeding the tibble from each individual clinic into the function, but we could have named it something different. Next, we tell the function what to do with each clinic's data using `lm(post_qol ~ days*reason + base_qol, data = clinic_tib)`. Notice that within `lm()` we set the data argument to be the input of the function (data = clinic_tib).
+
+Think of it like this: `map()` sends each tibble within **data** to the anonymous function `\(clinic_tib)`, where it is given the name `clinic_tib` so that it can be set as the data to which `lm()` fits the model. Basically a model predicting post-surgery quality of life from **days**, **reason**, their interaction and baseline quality of life (`post_qol ~ days*reason + base_qol`) is fitted to the data from each clinic separately and stored in a new column called **model**.
+
+::: callout-note
+## Lambda functions
+
+In the book I discuss creating your own functions. In short, when we use a function like `mean()` we are accessing some code that someone else has written that computes a mean. We usually place something in the brackets, there are known as inputs or arguments. We can write our own functions like using this general format
+
+```         
+name_of_function <- function(input, another_input){what_to_do_with_the_inputs}
+```
+
+For example, to create a function that adds two numbers we could execute
+
+```         
+add_2_things <- function(first_number, second_number){first_number + second_number}
+```
+
+This code creates a new function called `add_2_things()`. The stuff in brackets tells the function to expect two inputs/arguments. I've called the first input first_number and the second second_number. The stuff in the curly braces then tells the function what to do with these inputs (in this case it adds the two inputs). The names I assigned to the inputs are arbitrary, these two versions of the code are equivalent to each other and to the code above
+
+```         
+add_2_things <- function(x, y){x + y} 
+add_2_things <- function(alice, milton){alice + milton}
+```
+
+In each case we have changed the names of the inputs and carried those changes into the curly brackets. The function we have just created is called a named function because we assigned it a name (`add_2_things()`) and because it has a name, we can use it within our session like any other function. For example, we can add the numbers 52 and 79 by executing
+
+```         
+add_2_things(first_number = 52, second_number = 79)
+```
+
+or equivalently
+
+```         
+add_2_things(52, 79)
+```
+
+In each case the function returns the result (in this case 131). Sometimes, we need a function for a specific purpose and don't need to name it. In this case we create an anonymous function, also known as a lambda function. To create one of these we use this syntax
+
+```         
+\(input) {what_to_do_with_the_input}
+```
+
+Note that because we're not assigning the function a name we use `\()` as shorthand for `function()`. It's also not necessary to use the curly braces if the contents of the function is a single line of code. The anonymous function below squares whatever number you put into it
+
+```         
+\(x) {x^2}
+```
+
+Again, x is an arbitrary label. This code is equivalent
+
+```         
+\(number) {number^2}
+```
+
+but by labelling the input as `number` we make the code more readable because it we can see that the function expects a number as its input `\(number)` and squares whatever that number is as its output `{number^2}`.
+:::
+
+We can also store the coefficient table of each model we've fitted in a new variable called **coeffs** by again using `map()` to apply the `tidy()` function from `broom` to each of the models stored in the variable called **model** that we just created. We could add this the mutate function above
+
+```         
+dplyr::mutate(     
+  model = purrr::map(.x = data,
+                    .f = \(clinic_tib) lm(post_qol ~ days*reason + base_qol, data = clinic_tib)),
+  coefs = purrr::map(model, tidy, conf.int = TRUE)
+  )
+```
+
+Now if we pipe the earlier code that arranged, grouped and nested the clinics into this mutate function, we get the full code needed to create the individual models and store them as clinic_lms.
+
+```         
+clinic_lms <- cosmetic_tib  |>   
+  dplyr::arrange(clinic) |>    
+  dplyr::group_by(clinic)  |>     
+  tidyr::nest()  |>    
+  dplyr::mutate(     
+    model = purrr::map(.x = data, .f = \(clinic_tib) lm(post_qol ~ days*reason + base_qol, data = clinic_tib)),
+    coefs = purrr::map(model, tidy, conf.int = TRUE)     )
+```
+
+```{r}
+clinic_lms <- cosmetic_tib  |>
+  dplyr::arrange(clinic) |> 
+  dplyr::group_by(clinic)  |>  
+  tidyr::nest()  |> 
+  dplyr::mutate(
+    model = purrr::map(.x = data, .f = \(clinic_tib) lm(post_qol ~ days*reason + base_qol, data = clinic_tib)),
+    coefs = purrr::map(model, tidy, conf.int = TRUE)
+    )
+    
+clinic_lms    
+```
+
+The object clinic_lms is now a tibble with 20 rows and four columns. As we saw earlier, the first column lists the clinics and the second column, **data** contains the data for an individual clinic stored as a tibble. The third column, **model**, has cells labelled \<S3: lm\>, which tells us that each cell contains an object created with the `lm()` function. Basically, the cell in each row of this column contains the fitted model for the corresponding clinic. For example, if we were to access the contents of the cell in row 5 and apply `summary()` to it we'd see the model summary for clinic 5. The code in the box below does this, run this code then change the number in the square brackets to 2 to see the second row of **model**, which is the model for clinic 2.
+
+```{r}
+clinic_lms$model[[5]] |> summary()
+```
+
+The fourth column, **coefs**, has cells labelled \<tibble\>, which tells us that each cell contains a tibble. Specifically, for each row the cell in this column contains the tibble of model parameters generated by `tidy()` for the fitted model in the corresponding clinic. For example, if we were to access the contents of the cell in row 9 we'd see the table of model parameters for clinic 9. Try this by executing the code in the box below to see the coefficients for the model for clinic 5. Change the number in the square brackets to 2 to view the parameter estimates for the model fitted in clinic 2.
+
+```{r}
+clinic_lms$coefs[[5]]
+```
+
+Having fit the model in each clinic we could view the model parameters by unnesting the data using
+
+```         
+models_tib <- clinic_lms  |>   
+  dplyr::select(-c(data, model)) |>    
+  tidyr::unnest(coefs) 
+
+models_tib
+```
+
+This code creates and displays an object called models_tib, that takes the clinic_lms object that we just created, ignores the variables **data** and **model**, and then unnests the data by the variable **coefs**, which expands the tibbles of parameter estimates stored in **coefs** into rows. In other words, instead of each clinic occupying a single row in the tibble it will now occupy 5 rows (one for the intercept and one for each of the 4 predictors).
+
+```{r}
+models_tib <- clinic_lms  |>
+  dplyr::select(-c(data, model)) |> 
+  tidyr::unnest(coefs)
+models_tib
+```
+
+The result is a 100 row tibble. Basically we have stacked the tables of model parameters for each clinic into a single table. In doing so we can compare the parameter estimates across clinics, and generally get a feel for what's going on in the data? Is there variability in intercepts? Is there variability in slopes? Is the effect of days and the days × reason interaction consistent across clinics?
+
+All of these questions are difficult to answer when scanning a 100-row table. Let's make life a bit easier by plotting the information instead. Use what you know about `ggplot2` to plot the parameter estimates in models (in the variable **estimate**) using `geom_density()` and then `facet_wrap()` to create different plots for the different predictors in the model (in the variable **terms**).
+
+```{r}
+ggplot(models_tib, aes(estimate)) +
+  geom_density() +
+  facet_wrap(~term , scales = "free") +
+  theme_minimal()
+```
+
+The resulting plot shows the distributions of the parameter estimates across the 20 clinics. You need to interpret these plots within the context of scale of measurement. For example, the intercept is centred around 30 and (theoretically) should be limited to values in the range of 0 to 100 (the range of the quality of life scale). In this context the fact that the bulk of our estimates range from 0 up to around 50 indicates a lot of variability in intercepts. It makes sense that this variable is treated as a random effect. For days, the mode is around 0.05 and the bulk of the distribution falls between -0.05 and 0.10. This range seems tiny, but context is everything: the variable is measured on a scale of 0 to about 400, so we'd expect a unit change in the predictor (1 unit along a 400 point scale) to have small effects on the outcome. Baseline quality of life (also measured on a 100 point scale) results in parameter estimates that range between about 0.4 and 0.6. Because baseline quality of life and post-surgery quality of life have the same units of measurement, these parameters can be interpreted like a correlation coefficient. It hovers around 0.5 infrequently straying too far from this value. It would be reasonable not to estimate the variability in this parameter.
+
+## Fitting Multilevel Models
+
+Having got a feel for the data we can finally fit the model. We're going to use the `lmer()` function from the `lme4` package but also load the `lmerTest` package so that we get *p*-values for the model parameters, but we will remember all of the caveats about *p*-values in the book. The `lmer` function takes the following form
+
+```         
+my_model <- lmer(outcome ~ predictor(s) + (random effects),
+                data = tibble,
+                na.action = an action,
+                REML = TRUE,
+                control = lmerControl(), 
+                subset)
+```
+
+Essentially it is similar to `lm()` in that we specify a formula that describes the model, and then there are some other arguments that we can use. By default restricted maximum likelihood estimation is used (REML) but we can change to maximum likelihood estimation by specifying REML = FALSE, we can also fit the model to a subset of the data using the subset argument. The control argument allows us to change aspects of the fitting process. A common use of this is to specify a different optimizer if the model can't be fit.
+
+![](images/Screenshot%202023-11-30%20115020.png)
+
+Therefore, we want to include both a random intercept and a random slope for **days** across **clinics**.
+
+**Specifying random effects**
+
+Fixed effects in the model are specified using the same type of formula that we have used throughout these tutorials, where we specify the outcome, use a tilde to mean 'is predicted from' and then list the variables from which to predict it. For example, in previous sections where we fitted individual models to each clinic (i.e. we ignored random effects) we used
+
+`post_qol ~ days*reason + base_qol`
+
+which is equivalent to
+
+`post_qol ~ days + reason + days:reason + base_qol`
+
+To add random effects to the model we include an addition term (or terms) in brackets after the fixed effects that takes for the form
+
+`(effect|variable_within_which_the_effect_varies)`
+
+In which we replace effect with 1 to specify the intercept and the name of the variable that varies across contexts for a random slope. We also replace variable_within_which_the_effect_varies with the name of the variable across which effects vary (in this case clinic).
+
+For example, to specify a random intercept across clinics we'd use
+
+`(1|clinic)`
+
+And to specify a random intercept and random slope for the variable days across clinics we'd use
+
+`(1 + days|clinic)`
+
+In fact, intercepts are implied so the following shorthand works too
+
+`(days|clinic)`
+
+To specify the current model we could execute
+
+```         
+cosmetic_mod <- lmerTest::lmer(post_qol ~ days*reason + base_qol + (days|clinic), data = cosmetic_tib)
+```
+
+This code creates a model called cosmetic_mod that was specified in the equation above.
+
+```{r}
+cosmetic_mod <- lmerTest::lmer(post_qol ~ days*reason + base_qol + (days|clinic),
+                               data = cosmetic_tib) 
+
+
+```
+
+### A Visit From the Cockroach of Convergence
+
+You should find that R produces one of those unpleasant error message that it is prone to throw at you. It uses words like 'converge' and 'unidentifiable'. No-one wants to see those words. The 'failed to converge' bit relates to the cockroach of convergence who has scuttled into your model and invited his friends along to spray their cuticular hydrocarbons everywhere and mess with your shit. The book discusses convergence in more detail, but one immediate step is to use the `allFit()` function on your model - it will try all available optimizers and report back.
+
+```{r}
+allFit(cosmetic_mod)
+```
+
+The attempts to fit the model with different optimizers haven't gone well. The cockroach of convergence has graffitied your console with his red text of despair. The model fails to converge with every optimizer (bobyqa, Nelder_Mead, nlminbwrap etc.). On the plus side, we know the original failure wasn't a false positive: our model is definitely messed up.
+
+### Rescaling Variables
+
+Although the cockroach of convergence is undoubtedly evil, deep inside a slither of good remains and he offers us vital clue by asking Rescale variables? What does that mean? Our outcome variable (**post_qol**) and one of the predictors (**pre_qol**) can range from 0 to 100, the reason for surgery can range from 0 (change appearance) to 1 (physical reason) but the predictor **days** varies from 0 to 400. Our model has variables measured on very different scales. In particular, **days** is likely to yield a very small parameter. To see why, imagine we expect quality of life to increase by 10 units (a fairly big change on aa 100-point scale) over 400 days. This is a change of 0.027 per day. Remember that the parameter estimate for days is the change in quality of life for every extra day since surgery and so would also be 0.027 (a tiny value). The warning message is suggesting that if the variables were measured on more similar scales the model might converge.
+
+The main problem is likely to be the variable **days** because it has a wide range (0 to 400). We have expressed the time since surgery in days, but this choice is arbitrary. We could have chosen hours, minutes, seconds, months, or years all of which are re-expressions of the same information. If we were to express the time since surgery in months rather than days the range of 0 to 400 days becomes 0 to 13 (approx.) months. This might help because the range has decreased and is more in line with the other variables in the model.
+
+Create a variable called **months** in cosmetic_tib that expresses the days since surgery in months.
+
+```{r}
+cosmetic_tib <- cosmetic_tib |> 
+  dplyr::mutate(
+    months = days*12/365
+  )
+cosmetic_tib
+```
+
+Note that the variable **months** has been added to the tibble.
+
+Recreate cosmetic_mod using the variable **months** instead of **days**. Remember to change both the fixed and random effects.
+
+```{r}
+cosmetic_mod <- lmerTest::lmer(post_qol ~ months*reason + base_qol + (months|clinic),
+                               data = cosmetic_tib)
+
+```
+
+### The Cockroach of Convergence Returns
+
+The cockroach is still scuttling about throwing little cockroach-sized spanners in the works. This time there is no message about rescaling variables though.
+
+Use `allFit()` to see what happens with other optimizers.
+
+```{r}
+allFit(cosmetic_mod)
+
+```
+
+It turns out that the model converges using 5 of 7 available optimizers.
+
+### Fit the Model Again
+
+We know that the model will converge with certain optimizers, so we can refit the model using the control argument of `lmer()` to specify an optimizer that works.
+
+For example, to specify the bobyqa optimizer, we would fit the model as
+
+```         
+cosmetic_bob <- lmerTest::lmer(   
+    post_qol ~ months*reason + base_qol + (months|clinic),
+    data = cosmetic_tib,
+    control = lmerControl(optimizer="bobyqa")
+    )
+```
+
+Note that we have added the argument control = lmerControl(optimizer="bobyqa"), which specifies the bobyqa optimizer. If you'd rather use a different optimizer replace bobyqa with its name, for example control = lmerControl(optimizer=" Nelder_Mead"). The names of the optimizers are given in the output of `allFit()`. I've named this model cosmetic_bob to remind me of the optimizer used and because it amused me.
+
+Use the code box below to create cosmetic_bob using months as a predictor and specifying the bobyqa optimizer. Use `summary()` to view a summary of the model.
+
+```{r}
+cosmetic_bob <- lmerTest::lmer(
+  post_qol ~ months*reason + base_qol + (months|clinic),
+  data = cosmetic_tib,
+  control = lmerControl(optimizer="bobyqa")
+  )
+summary(cosmetic_bob)
+```
+
+By default Type III sums of squares are used and *F*-tests are based on Satterthwaite's approximation. The book chapter discusses other options but these defaults are fine.
+
+Use the code box below to obtain the *F*−statistics for the fixed effects from cosmetic_bob. You can use `knitr::kable(digits = 3)` to round the values to 3 decimal places.
+
+```{r}
+anova(cosmetic_bob) |>
+  knitr::kable(digits = 3)
+```
+
+::: callout-note
+## Report
+
+There are significant effects of baseline quality of life, *F*(1, 1534.92) = 382.66, *p* \< 0.001 and the months × reason interaction, *F*(1, 1535.12) = 11.84, *p* \< 0.001, but not the overall effect of months, *F*(1, 19.03) = 3.21, *p* = 0.089, or the main effect of reason, *F*(1, 1535.47) = 3.36, *p* = 0.067.
+:::
+
+We'll return to these effects but note the interaction effect is significant. We have previously used the `tidy()` function from `broom` to inspect model parameters. For multilevel models the `tidy()` function resides in the `broom.mixed` package, but otherwise can be used as we have used it before.
+
+To view the model parameters execute
+
+```         
+broom.mixed::tidy(cosmetic_bob, conf.int = T)
+```
+
+```{r}
+broom.mixed::tidy(cosmetic_bob, conf.int = T) |>
+  knitr::kable(digits = 3)
+```
+
+We will come back to this table of parameter estimates, but the key finding is the significant interaction between the months since surgery and the reason for surgery. We can tease this interaction apart like we did when we looked at moderation effects (`discovr_10`) using simple slopes; that is, estimate the slope of **months** separately for physical and cosmetic reasons for surgery.
+
+We can achieve this in several ways
+
+-   The `sim_slopes()` and `interact_plot()` functions from `interactions` package, which we met in `discovr_10`).
+
+-   The `estimate_slopes()` function from the `modelbased` package, which we met in `discover_11` and `discovr_12`.
+
+-   Both of the above methods are built upon the `emtrends()` function from the `emmeans` package, which we met in `discovr_13`, so that's a third option!
+
+The `estimate_slopes()` function is probably the most intuitive of the functions and produces nice tidy output. It takes the form
+
+```         
+modelbased::estimate_slopes(my_model,
+                            trend = "continuous_variable",
+                            at = "categorical_variable",
+                            ci = 0.95)
+```
+
+Within the function we replace my_model with the model we have created (cosmetic_bob), replace continuous_variable with the continuous predictor (**months**) and categorical_variable with the grouping variable (**reason**). By default it will return 95% confidence intervals so we can omit this argument unless we want to use a different level.
+
+We can save the simple slopes for the current model in an object called cosmetic_slopes and view it by executing
+
+```         
+cosmetic_slopes <- modelbased::estimate_slopes(cosmetic_bob,
+                                              trend = "months",
+                                              at = "reason",
+                                              ci = 0.95) 
+cosmetic_slopes
+```
+
+Use the code box below to obtain the simple slopes of **months** for each **reason**.
+
+```{r}
+cosmetic_slopes <- modelbased::estimate_slopes(cosmetic_bob,
+                                               trend = "months",
+                                               at = "reason")
+cosmetic_slopes |>
+  knitr::kable(digits = 3)
+```
+
+For those who had surgery to change their appearance, their quality of life increased over time but not significantly so, β = 0.48 \[-0.35, 1.31\], *t* = 1.22, *p* = 0.239. For every additional month since surgery quality of life increased by 0.48 units (on the 100-point scale). Over a year, this amounts to a change of 5.76 units. In contrast, for those who had surgery to help with a physical problem, their quality of life significantly increased over time, β = 0.93 \[0.09, 1.77\], *t* = 2.32, *p* = 0.031. For every additional month since surgery quality of life increased by 0.93 units (on the 100-point scale). Over a year, this amounts to a change of 11.16 units. The change in quality of life over the same time period for people who had surgery for a physical reason is about double that of people who had it for a cosmetic reason.
+
+For a quick visualisation of this interaction effect, we can use the `interact_plot()` functuion from the `interactions` package. Execute
+
+```         
+interactions::interact_plot(   
+  model = cosmetic_bob,   
+  pred = months,   
+  modx = reason,   
+  nterval = TRUE,   
+  x.label = "Months since surgery",   
+  y.label = "Quality of life post-surgery (0-100)",   
+  legend.main = "Reason for surgery"
+  )
+```
+
+Within the function we specify the model we want to plot (cosmetic_bob), the variable to be plotted on the x-axis (pred = months), and the variable for which we want different lines (modx = reason). We also ask for 95% confidence intervals (interval = TRUE) and specify labels for the x- and y-axis and legend.
+
+```{r}
+interactions::interact_plot(
+  model = cosmetic_bob,
+  pred = months,
+  modx = reason,
+  interval = TRUE,
+  x.label = "Months since surgery",
+  y.label = "Quality of life post-surgery (0-100)",
+  legend.main = "Reason for surgery"
+  )
+
+```
+
+The resulting plot shows what we already know from the parameter estimates for the two groups; that is, regardless of the reason for surgery quality of life increases over time (both lines have positive slopes), but quality of life changes more rapidly over time for those who have surgery for a physical reason (the slope of the line is steeper in the group that had surgery for a physical reason).
+
+![](images/Screenshot%202023-11-30%20125754.png)

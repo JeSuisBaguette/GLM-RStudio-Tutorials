@@ -1,0 +1,654 @@
+---
+title: "DiscovR_11"
+author: "Ferdinand Edward Bitan"
+format: 
+  html:
+    self-contained: true
+    theme: darkly
+    toc: true
+    code-fold: true
+knitr: 
+  opts_chunk: 
+    warning: false
+    message: false
+editor: visual
+---
+
+# DiscovR_11
+
+## Libraries
+
+```{r}
+library(BayesFactor)
+library(broom)
+library(effectsize)
+library(emmeans)
+library(here)
+library(ggfortify)
+library(Hmisc)
+library(knitr)
+library(modelbased)
+library(parameters)
+library(sandwich)
+library(tidyverse)
+```
+
+## Data
+
+```{r}
+puppy_tib <- here::here("data/puppies.csv") |>
+  readr::read_csv() |>
+  dplyr::mutate(
+    dose = forcats::as_factor(dose)
+  )
+```
+
+```{r}
+puppy_tib <- puppy_tib |>
+  dplyr::mutate(
+    dose = forcats::fct_relevel(dose, "Control", "15 mins", "30 mins")
+  )
+```
+
+## A Puppy-tastic Example
+
+Puppy therapy is a form of animal-assisted therapy, in which puppy contact is introduced into the therapeutic process. Despite a common belief that puppy therapy is effective in reducing stress, the evidence base is pretty mixed. Imagine we ran a study in which we randomized people into three groups: (1) a control group in which people had no puppy contact; (2) 15 minutes of puppy therapy (a low-dose group); and (3) 30 minutes of puppy contact (a high-dose group). The dependent variable was a measure of happiness ranging from 0 (as unhappy as I can possibly imagine being) to 10 (as happy as I can possibly imagine being).
+
+The design of this study mimics a very simple randomized controlled trial (as used in pharmacological, medical and psychological intervention trials) because people are randomized into a control group or groups containing the active intervention (in this case puppies, but in other cases a drug or a surgical procedure). We'd predict that any form of puppy therapy should be better than the control (i.e. higher happiness scores) but also formulate a dose-response hypothesis that as exposure time increases (from 0 minutes to 15 and 30) happiness will increase too.
+
+```{r}
+puppy_tib
+```
+
+*Happiness is a 'double' data type above. Integers are whole numbers and doubles are values with decimal places.*
+
+To check the levels of a factor we use the `levels()` function. For example, to check the levels of the variable **dose** within the tibble puppy_tib we'd execute
+
+```{r}
+levels(puppy_tib$dose)
+```
+
+## The Model
+
+| Group                | Dummy 1 (long) | Dummy 2 (short) |
+|----------------------|----------------|-----------------|
+| No puppies (control) | 0              | 0               |
+| 15 minutes           | 0              | 1               |
+| 30 minutes           | 1              | 0               |
+
+The table above shows dummy coding for this example. Every person has their group membership coded by a unique combination of 0s and 1s across the two dummy variables. Someone in the no puppy condition would have a 0 for both dummy variables, someone who had 15 minutes of therapy would have a 0 on the dummy variable labelled **long** and a 1 on the dummy variable labelled **short**, and someone who received 30-minutes of puppy therapy would have a 1 on the dummy variable labelled **long** and a 0 on the dummy variable labelled **short**. The two dummy variables represent the length of the dose of puppy therapy: one compares the 30-minute dose against no puppies (**long**) and the other compares the 15-minute does against no puppies (**short**).
+
+The model we are fitting is:
+
+$$
+happiness_i = \hat\beta_0 + \hat\beta_1long_i + \hat\beta_2short_i + \epsilon_i
+$$
+
+in which a persons happiness is predicted from knowing their group code (i.e., the numeric code for the long and short dummy variables in the table above) and the estimates of the parameters for these effects and the intercept ($\beta_0$).
+
+## Exploring the Data
+
+Violin plot with error bars with **dose** on the *x*-axis and **happiness** scores on the *y*-axis.
+
+```{r}
+ggplot2::ggplot(puppy_tib, aes(dose, happiness)) + 
+  geom_violin() +
+  stat_summary(fun.data = "mean_cl_boot") +
+  labs(x = "Dose of puppies", y = "Happiness (0-10)") +
+  scale_y_continuous(breaks = 1:7) +
+  theme_minimal()
+```
+
+Compute the mean and a 95% confidence interval of happiness scores split by the therapy group to which a person belonged.
+
+```{r}
+puppy_tib |> 
+  dplyr::group_by(dose) |> 
+  dplyr::summarize(
+    mean = mean(happiness, na.rm = TRUE),
+    `95% CI lower` = mean_cl_normal(happiness)$ymin,
+    `95% CI upper` = mean_cl_normal(happiness)$ymax
+  ) |> 
+  knitr::kable(digits = 3)
+```
+
+**Using the confidence intervals for the mean of each group, what can you conclude about the group means?**
+
+[The 30-minute and control group means will be different at close to *p* = 0.05.]{.underline}
+
+None of the group means will be significantly different at *p* \< 0.05 because all of their confidence intervals overlap.
+
+\
+*It's hard to tell precisely, but the 95% confidence intervals for the 30-minute and control group overlap by about ¼ of their length implying a significant difference at around p = 0.05. It will be very close to this value, but you can't really call from the graph whether it will fall just below or just above.*
+
+## Fit the Model
+
+### Dummy Coding in R
+
+R automatically dummy codes categorical predictors. If the categorical predictor is a factor, then it uses the first level of the variable as its reference category. For the variable **dose** (which is a factor) the levels are ordered No puppies, 15 minutes and 30 minutes. As such, dummy variable 1 will represent the no puppies group vs. the 15-minute group. R will label this variable as **dose15 mins**, which tells us that this dummy variable represents the part of **dose** that compares the 15-minute group to the no puppies group. Dummy variable 2 will represent the no puppies group vs. the 30-minute group. R will label this variable as **dose30 mins**, which tells us that this dummy variable represents the part of **dose** that compares the 30-minute group to the no puppies group.
+
+For these data, these default comparisons make sense (we compare everything to the no puppies group) but there will be times when the default creation of dummy variables and the order of your factor levels groups do not combine to make the comparisons that you want. You may need to change the order of factor levels, or specify bespoke contrasts (see later).
+
+::: callout-note
+## Tip: Character Variables
+
+You can use character variables (rather than factors) as predictors in linear models and will try to do something sensible with them. Specifically, it orders the categories alphabetically and creates dummy variables using the first category as the reference category. However, it's good practice to convert character variables to factors yourself and specify the order of levels so that you are in control of what goes into the model.
+:::
+
+### Using lm()
+
+To fit the model we use the `lm()` function, because we are fitting a linear model with a categorical predictor. We've used this function before, just to recap it takes the following general form (I've retained only the key options):
+
+```         
+lm(outcome ~ predictor(s), data, subset, na.action = na.fail)
+```
+
+Based on previous tutorials we could do the following 4 steps:
+
+1.  Create a model called puppy_lm using `lm()`
+
+2.  Summarize the fit of the model using `broom::glance()`
+
+3.  Obtain the model parameters and confidence intervals using `broom::tidy()`
+
+4.  Plot diagnostics using `plot()`
+
+This is, basically, what we do except that when we're using the linear model to compare means, we often want an overall test of each predictor. We don't get this with `broom::glance()` (we get only the overall fit). Instead we can use the `anova()` function to get overall effects of the model and then pipe this into `parameters::model_parameters()` to get an effect size (ω\^2) for each predictor.
+
+To get overall (*omnibus*) tests of categorical predictors we can use the following general code:
+
+```         
+anova(my_model) |>    
+  parameters::model_parameters(effectsize_type = "omega")
+```
+
+In which we replace my_model with the name of a model created using `lm()`. By default we will get the overall effect size (ω\^2), but we will see in future tutorials that you can instead get a version of this effect size that adjusts for other predictors known as partial ω\^2, by adding the argument partial = TRUE.
+
+```{r}
+puppy_lm <- lm(happiness ~ dose, data = puppy_tib)
+
+anova(puppy_lm) |> 
+  parameters::model_parameters(effectsize_type = "omega") |> 
+  knitr::kable(digits = 3)
+
+broom::tidy(puppy_lm, conf.int = TRUE) |> 
+  knitr::kable(digits = 3)
+
+```
+
+**How would you interpret the *F*-statistic?**
+
+Overall happiness could not be significantly predicted from the dummy variables representing the group means. This implies that the group means are not significantly different.
+
+[Overall happiness can be significantly predicted from the dummy variables representing the group means. This implies that the group means are significantly different.]{.underline}\
+\
+*Because the value of p is 0.025, which is less than the criterion of 0.05, we know that using the group means helps us to predict happiness. In other words the group means are significantly different.*
+
+**What does the *F*-statistic represent?**
+
+[It is the ratio of the variance in happiness explained by the model to the variance that is unexplained (the error).]{.underline}
+
+It is the proportion of variance in happiness that is not explained by the model.
+
+It is the total variance in happiness explained by the model.
+
+It is the proportion of variance in happiness explained by the model.
+
+**How would you interpret the parameter estimates?**
+
+[Happiness scores were significantly different between the 30-minute group and the control group but not between the 15-minute group and the control group.]{.underline}
+
+Happiness scores were not significantly different between the 30-minute group and the 15-minute group.
+
+Happiness scores were significantly different between both the 30-minute group and the control group and the 15-minute group and the control group.
+
+Happiness scores were not significantly different between both the 30-minute group and the control group but were between the 15-minute group and the control group.
+
+Happiness scores were not significantly different between the 30-minute group and the control group and also not between the 15-minute group and the control group.\
+\
+*Because the value of p is 0.008 for the dummy variable called dose30 mins, which is less than the criterion of 0.05, we know that the difference between the means of the 30-minute group and the control group is significantly different. However, because the value of p is 0.282 for the dummy variable called dose15 mins, which is greater than the criterion of 0.05, we know that the difference between the means of the 15-minute group and the control group was not significantly different.*
+
+The test of whether the group means are the same is represented by the *F*-statistic for the effect of **dose**, which is significant, *F*(2, 12) = 5.12, *p* = 0.025. Given that our model represents the group means, this *F* tells us that using group means to predict happiness scores is significantly better than using the mean of all scores: in other words, the group means are significantly different
+
+Moving onto the parameter estimates, b\^0 (the value in the column labelled estimate and the row labelled (intercept)) is equal to the mean of the baseline category (the no puppies group), b\^0 = 2.20 (check your earlier summary statistics!). The *b*-value for the first dummy variable (labelled dose15 mins) is equal to the difference between the means of the 15-minute group and the control group (3.20 − 2.20 = 1.00).
+
+The *b*-value for the second dummy variable (labelled dose30 mins) is equal to the difference between the means of the 30-minute group and the control group (5.00 − 2.20 = 2.80). These values demonstrate how dummy coding partitions the variance in happiness scores to compare specific group means. We can see from the significance values of the associated *t*-tests that the difference between the 30-minute group and the control group is significant because *p* = 0.008, which is less than 0.05; however, the difference between the 15-minute and the control group is not (*p* = 0.282).
+
+::: callout-tip
+## Report
+
+Overall, happiness was significantly different across the three therapy groups, *F*(2, 12) = 5.12, *p* = 0.025. Happiness was significantly different to zero in the no puppies group, b\^ = 2.20 \[0.83, 3.57\], *t* = 3.51, *p* = 0.004, was not significantly higher in the 15-minute therapy group compared to the no puppy control, b\^ = 1.00 \[-0.93, 2.93\], *t* = 1.13, *p* = 0.282, but was significantly higher the 15-minute therapy group compared to the no puppy control, b\^ = 2.80 \[0.87, 4.73\], *t* = 3.16, *p* = 0.008. A 30-minutes dose of puppies, therefore, appears to improve happiness compared to no puppies but a 15-minutes does does not.
+:::
+
+### Diagnostic Plots
+
+As with any linear model, we can use the `plot()` function to produce diagnostic plots from the model. We have used this function in previous tutorials. Remember that it takes this general form:
+
+```         
+plot(my_model, which = numbers_of_the_plots_you_want)
+```
+
+You place the name of your model into the function and use which to request specific plots. We use plots 1 and 3 to explore linearity and homoscedasticity, plot 2 is a Q-Q plot to look for normality in residuals, and plot 4 shows each case's Cook's distance so is useful for identifying influential cases. Therefore, a reasonable set of plots is to look at plots 1, 3, 2, and 4 from the `plot()` function.
+
+```{r}
+#plot(puppy_lm, c(1, 3, 2, 4))
+
+ggplot2::autoplot(puppy_lm,
+                  which = c(1, 3, 2, 4),
+                  colour = "#5c97bf",
+                  smooth.colour = "#ef4836",
+                  alpha = 0.5,
+                  size = 1) + 
+  theme_minimal()
+```
+
+**How would you interpret the *Residual vs. fitted* and *Scale-location* plots?**
+
+[I can't see any problems]{.underline}
+
+I'm not sure, I'm not used to seeing columns of dots on these plots and it's making me think something has gone badly wrong.
+
+I can see a violation of homoscedasticity\
+\
+*The red lines are flat and the columns are equal length suggesting homoscedasticity.*
+
+**Based on the Q-Q plot, can we assume normality of the residuals?**
+
+[No]{.underline}
+
+Yes
+
+Maybe
+
+*They deviate at the extremes*
+
+**Based on the plot of Cook's distance, are there any influential cases?**
+
+[No]{.underline}
+
+Maybe
+
+Yes
+
+*The largest Cook's distance is about 0.2 which is well below the threshold of 1 at which we'd worry.*
+
+The *Residual vs. fitted* and *Scale-location* plots show points that are equally spread for the three groups, which implies that residual variances are similar across groups. The dots look odd because they are aligned in columns, but this reflects the fact there are only 3 possible values of the predictor variable (no puppies, 15 minutes and 30 minutes). The Q-Q plot tells us about the normality of residuals in the model. We want our residuals to be normally distributed which means that the dots on the graph should cling lovingly to the diagonal line. Ours look like they have had a bit of an argument with the diagonal line, which suggests that we may not be able to assume normality of errors and should perhaps use a robust model (which will be explained sooner than you might like). The plot of Cooks distances shows that they are all well below 1, so no influential cases to worry about.
+
+## Contrast Coding
+
+Remember that we predicted that any form of puppy therapy should be better (i.e. higher happiness scores) than the no puppies condition and that as exposure time increases happiness will increase too (a dose-response hypothesis). In the chapter we discovered that we can operationalize these hypotheses as two dummy variables using the contrast coding in the table below.
+
+| Group                | Dummy 1 (No puppies vs. puppies) | Dummy 2 (15 mins vs 30 mins) |
+|----------------------|----------------------------------|------------------------------|
+| No puppies (control) | -2/3                             | 0                            |
+| 15 minutes           | 1/3                              | -1/2                         |
+| 30 minutes           | 1/3                              | 1/2                          |
+
+As revision from the chapter, when using this coding scheme the model we're fitting is:
+
+$$
+happiness_i = \hat\beta_0 + \hat\beta_1contrast 1_i + \hat\beta_2{contrast 2}_i + \epsilon_i
+$$
+
+In which the variables **contrast 1** and **contrast 2** are the dummy variables that represents the no puppies group compared to all other groups (**contrast 1**), and the difference between the 15-minute group and the 30-minute group (**contrast 2**).
+
+**Imagine that we believed that puppy therapy was only effective after 20 minues. We, therefore, wanted to compare the 30-minute group to all other groups in the first contrast, and compare the no puppies to the 15-minute group in the second. What contrast codes would make these comparisons?**
+
+Contrast 1: control (⅓), 15-mins (-⅔), 30-mins (⅓); Contrast 2: control (-⅓), 15-mins (-⅓), 30-mins (3)
+
+Contrast 1: control (-⅓), 15-mins (-⅓), 30-mins (⅓); Contrast 2: control (-½), 15-mins (½), 30-mins (0)
+
+[Contrast 1: control (-⅓), 15-mins (-⅓), 30-mins (⅔); Contrast 2: control (½), 15-mins (-½), 30-mins (0)]{.underline}
+
+Contrast 1: control (⅔), 15-mins (-⅓), 30-mins (-⅓); Contrast 2: control (0), 15-mins (-½), 30-mins (½)
+
+**Which of the following contrast codes would also make the same comparisons as in the main example?**
+
+Contrast 1: control (⅓), 15-mins (-⅔), 30-mins (⅓); Contrast 2: control (0), 15-mins (-½), 30-mins (1)
+
+[Contrast 1: control (2), 15-mins (-1), 30-mins (-1); Contrast 2: control (0), 15-mins (-1), 30-mins (1)]{.underline}
+
+Contrast 1: control (1), 15-mins (-1), 30-mins (-1); Contrast 2: control (0), 15-mins (1), 30-mins (-1)
+
+Contrast 1: control (-2), 15-mins (-2), 30-mins (4); Contrast 2: control (2), 15-mins (-2), 30-mins (0)
+
+Use the `contrast()` function to set the contrast attribute of a variable. It takes the general form:
+
+```         
+contrasts(predictor_variable) <- contrast_instructions
+```
+
+The contrast_instructions can be a set of weights for the contrasts that you want to do, or a built in contrast. To set the contrasts in Table 2, we need to tell what weights to assign to each group. The weights we want to assign for contrast 1 are −2/3 (no puppies), 1/3 (15-minute group) and 1/3 (30-minute group). We can collect these values into an object in the usual way. Lets call the object puppy_vs_none to remind us what it represents:
+
+```         
+puppy_vs_none <- c(-2/3, 1/3, 1/3)
+```
+
+The object puppy_vs_none indicates that the first group has a weight of −2/3, and the second and third groups a weight of 1/3. The order of the numbers is important because it corresponds to the order of the factor levels for the predictor variable. In the puppy data, remember that the order of levels of **dose** is no puppies, 15-minutes and 30-minutes. As such, puppy_vs_none contains the weights for no puppies, 15-minutes and 30-minutes, in that order.
+
+We can do the same for the second contrast. We know from Table 2 that the weights for contrast 2 are: 0 (no puppies), −1/2 (15-minute group) and 1/2 (30-minute group). Remembering that the first weight we enter will be for the no puppies group, we enter the value 0 as the first weight, then −1/2for the 15-minute group and finally 1/2 for the 30-minute group. Lets call this object short_vs_long to remind us that it compares the means of the shorter puppy therapy session against the mean of the longer one:
+
+```         
+short_vs_long <- c(0, -1/2, 1/2)
+```
+
+Having created these variables we need to bind them together as columns using `cbind()`, and set them as the contrast attached to our predictor variable, **dose**:
+
+```         
+contrasts(puppy_tib$dose) <- cbind(puppy_vs_none, short_vs_long)
+```
+
+This command sets the contrast property of **dose** to contain the weights for the two contrasts that we just created. To make sure we've done everything correctly we can check the contrasts for dose variable by executing:
+
+```         
+contrasts(puppy_tib$dose)
+```
+
+The weights have been converted to decimals, but you can see that they are set up as they should be
+
+```{r}
+puppy_vs_none <- c(-2/3, 1/3, 1/3)
+short_vs_long <- c(0, -1/2, 1/2)
+contrasts(puppy_tib$dose) <- cbind(puppy_vs_none, short_vs_long)
+
+contrasts(puppy_tib$dose)
+```
+
+::: callout-note
+## Built-in contrasts
+
+R has several functions for setting built-in contrasts. In each case n is the number of factor levels/group. For the puppy data n=3.
+
+-   `contr.treatment(n, base = x)`: Each category is compared to a user-defined baseline category, x. For the puppy example, to compare each group to the 30-minute group we'd use
+
+```         
+contr.treatment(3, base = 3)
+```
+
+-   `contr.SAS(n)`: Each category is compared to the last category.
+
+-   `contr.helmert(n)` Each category (except the first) is compared to the mean effect of all previous categories. For the puppy data this would give give us a first contrast that compares the second category (15-minutes) to the previous category (no puppies), and a second contrast that compares the third category (30-minutes) to the combined effect of 15-minutes and no puppies (the previous categories).
+
+You set these contrasts in the usual way. For example, to set a Helmert contrast for **dose** we'd execute:
+
+```         
+contrasts(puppy_tib$dose) <- contr.helmert(3)
+```
+:::
+
+Fit the model in same way as before:
+
+```{r}
+puppy_lm <- lm(happiness ~ dose, data = puppy_tib)
+
+anova(puppy_lm) |> 
+  parameters::model_parameters(effectsize_type = "omega") |> 
+  knitr::kable(digits = 3)
+
+broom::tidy(puppy_lm, conf.int = TRUE) |> 
+  knitr::kable(digits = 3)
+```
+
+**The values in the first table (the one with the *F*-statistic that was obtaine dusing `anova()`) are identical to when we used different coding for the dummy variables in the last tutorial. Why is that?**
+
+The *F*-statistic is stable across samples
+
+Because the dummy variables are independent both in this tutorial and the previous ones
+
+Because the Hessian decomposition of the orthonormalized hyper-parameter matrix has non-spatial eigen-trumpets
+
+[The *F*-statistic measures the overall fit of the model (i.e. overall, can we predict happiness from group means better than we can from the overall mean) and how we paramaterize those means doesn't affect the overall fit.]{.underline}
+
+**How would you interpret the table of parameter estimates?**
+
+Happiness scores were significantly different between both control group and the combined group of everyone who had any dose of puppy therapy and the 15-minute group and the 30-minute group.
+
+Happiness scores were significantly different between the 30-minute group and the control group and also not between the 15-minute group and the control group.
+
+Happiness scores were not significantly different between both control group and the combined group of everyone who had any dose of puppy therapy and the 15-minute group and the 30-minute group.
+
+[Happiness scores were significantly different between the control group and the combined group of everyone who had any dose of puppy therapy but not between the 15-minute group and the 30-minute group.]{.underline}
+
+\
+*Because the value in **p.value** is 0.029 for the first dummy variable, which is less than the criterion of 0.05, we know that the difference between the means of the control group is significantly different to the mean of the 15- and 30-minute groups combined. However, because the value in **p.value** is 0.065 for the second dummy variable, which is greater than the criterion of 0.05, we know that the difference between the means of the 15-minute group and the 30-minute group was not significantly different.*
+
+The first table has the test of whether the group means are the same represented by the *F*-statistic for the effect of **dose**. This table is identical to when we fitted the model using dummy coding. That's because, overall, the model hasn't changed (we're still predicting happiness from the 3 group means), it's only how we decompose the effect of **dose** that has changed.
+
+The table of parameter estimates is different to before. Notice that the contrasts are helpfully labelled because we named them when we set them up. The first contrast compares the combined puppy therapy groups to the no puppies control. The difference in the mean happiness for anyone having any duration of puppy therapy compared to those having no puppy therapy was 1.90, and if we assume this sample is one of the 95% that yields confidence intervals containing the population values then this difference could be anything between 0.23 (a fairly small difference given happiness was measured on a 10-point scale) and 3.57 (a fairly large shift along the 10-point scale). The observed difference of 1.90 is statistically significantly different from 0 as shown by the *t*-test, which has a *p* = 0.029. This contrast suggests that happiness was significantly higher in those exposed to puppies, than those who were not.
+
+The second contrast shows that the mean happiness across the people having 30-minutes of puppy therapy was 1.80 higher than those having 15 minutes. Again, if we assume this sample is one of the 95% that yields confidence intervals containing the population values then this difference could be anything between -0.13 (people who have 30 minutes of puppy therapy are less happy than those having 15 minutes) and 3.73 (people having 30 minutes of puppy therapy are a fair bit happier than those having 15 minutes). The observed difference of 1.80 is not statistically significantly different from 0 as shown by the *t*-test, which has a *p* = 0.065. This contrast suggests that happiness was statistically comparable in those receiving 15- and 30-minutes of puppy therapy.
+
+::: callout-tip
+## Report
+
+Overall, happiness was significantly different across the three therapy groups, *F*(2, 12) = 5.12, *p* = 0.025. Happiness was significantly different to zero in the no puppies group, b\^ = 3.47 \[2.68, 4.26\], *t* = 9.57, *p* \< 0.001. Happiness was significantly higher for those that had any puppy therapy compared to the no puppy control, b\^ = 1.90 \[0.23, 3.57\], *t* = 2.47, *p* = 0.029, but was not significantly different in the 30-minute therapy group compared to the 15-minute group, b\^ = 1.80 \[-0.13, 3.73\], *t* = 2.03, *p* = 0.065. A dose of puppies, therefore, appears to improve happiness compared to no puppies but the duration of therapy did not have a significant impact.
+:::
+
+## Trend Analysis (Polynomial Contrasts)
+
+ur groups have a meaningful order, so we might have wanted to conduct trend analysis. Had we wanted to do this we first make sure that the levels of dose were in the correct order (no puppies, 15-minutes and 30-minutes) and if not re-ordered them.
+
+With the factor levels in the correct order we would set the contrast using:
+
+```         
+contrasts(puppy_tib$dose) <- contr.poly(3)
+```
+
+The 3 tells `contr.poly()` how many groups there are in the predictor variable.
+
+```{r}
+contrasts(puppy_tib$dose) <- contr.poly(3)
+puppy_trend <- lm(happiness ~ dose, data = puppy_tib)
+
+anova(puppy_trend) |> 
+  parameters::parameters(effectsize_type = "omega") |> 
+  knitr::kable(digits = 3)
+
+broom::tidy(puppy_trend, conf.int = TRUE) |> 
+  knitr::kable(digits = 3)
+```
+
+The resulting Output breaks down the experimental effect to see whether it can explained by either a linear (**dose.L**) or a quadratic (**dose.Q**) relationship in the means First, lets look at the linear component. This contrast tests whether the means increase across groups in a linear way. For the linear trend the *t*-statistic is 1.98 and this value is significant at *p* = 0.008. Therefore, we can say that as the dose of puppy therapy increased from nothing to 15 minutes to 30 minutes, happiness increased proportionately. The quadratic trend tests whether the pattern of means is curvilinear (i.e., is represented by a curve that has one bend). The error bars on the violin plot, which we created in the *Exploring data* section, suggest that the means cannot be represented by a curve and the results for the quadratic trend bear this out. The *t*-statistic for the quadratic trend is non-significant, *p* = 0.612, which is not very significant at all.
+
+## Post-hoc Tests
+
+Were going to use the `estimate_contrasts()` function from the `modelbased` package (Makowski et al. 2022), which builds upon the `emmeans` package (Lenth 2022) to provide more user-friendly experience.
+
+To get *post hoc* tests for a linear model, you place the linear model into the function. In general, then:
+
+```         
+modelbased::estimate_contrasts(my_model,
+                                contrast = "predictor_variable",
+                                adjust = "holm",
+                                ci = 0.95)
+```
+
+In which my_model is replaced by the name of your linear model (puppy_lm in our case). Some of the key arguments are:
+
+-   contrast: replace "predictor_variable" with the name of the variable that you want *post hoc* tests for. In this case we'd set contrast = "dose".
+
+-   adjust: what adjustment to apply for the number of tests conducted. By default Holm's adjustment is applied, which we discussed earlier. You can change it to "bonferroni", "tukey", "hochberg", "hommel", "BH" (the Benjamini and Hochberg adjustment discussed earlier), "BY", "fdr" or "none" (to apply no adjustment, which I don't recommend).
+
+-   ci: Sets the width of the confidence interval. The default of 0.95 for a 95% interval is consistent with common practice.
+
+Therefore, using the defaults (which are sensible) we could get *post hoc* tests by executing:
+
+```         
+modelbased::estimate_contrasts(puppy_lm, contrast = "dose") 
+# If you prefer a Bonferroni adjustment then execute: 
+modelbased::estimate_contrasts(puppy_lm, contrast = "dose", adjust = "bonferroni")
+```
+
+```{r}
+modelbased::estimate_contrasts(puppy_lm, contrast = "dose") |> 
+  knitr::kable(digits = 3)
+```
+
+The first row of the output compares the 15-minute and the 30-minute puppy therapy groups and reveals a non-significant difference (*p* = 0.130 is greater than 0.05). The duration of puppy therapy didn't significantly affect mean happiness. The second row compares the no puppies group to the 15-minute group and also reveals a non-significant difference (*p* = 0.282 is greater than 0.05). The final row compares the no puppies group to the 30-minute group where there is a significant difference (*p* = 0.025 is less than 0.05).
+
+The output also shows us the mean difference in happiness between each pair of groups and the confidence interval for that difference. For example, we can see that comparing the no puppies group to the 30 minute group the difference in mean happiness was -2.80. The direction of the value reflects the order of the groups: because no puppies is listed as *Level1* and 30 mins as *Level2* the minus sign tells us that happiness was lower in the no puppies group. If we assume that this sample is one of the 95% that yields a confidence interval containing the population value, then this difference in mean happiness might be as large in magnitude as 5.27 (a very large effect given happiness is measured on a 10-point scale) or as small as 0.33 (virtually no difference).
+
+## Cohen's d
+
+We can use the `effectsize` package (Ben-Shachar, Lüdecke, and Makowski 2020; Ben-Shachar et al. 2022), which we met in `discovr_09`, to calculate Cohen's *d*. Our samples are small (*n* \< 20) so we'll actually use Hedge's *g* (`hedges_g()`), which is a bias corrected version of *d* for small samples. Because we have three groups, and we want to quantify the effect between all pairs of groups we are going to need to filter the data to include only the groups we want to compare before we pass it into `hedges_g()`. So, for each effect size we'd adapt this code
+
+```         
+my_tib |>   dplyr::filter(predictor == "first_group" | predictor == "second_group") |>   effectsize::hedges_g(outcome ~ predictor,
+                      data = _,
+                      pooled_sd = TRUE,
+                      paired = FALSE)
+```
+
+and we'd replace my_tib with the name of our tibble (in this case puppy_tib), we'd replace predictor with the predictor variable, in this case **dose**, and we'd replace first_group and second_group with the values of the levels that we want to compare. Finally, note that within `hedges_g()` we assign the output of the pipe to the data argument using data = \_ and replace outcome with the name of the outcome variable (**happiness**) and predictor with the predictor variable, in this case **dose**.
+
+Let's adapt this code to compare the control group with the 15-minute therapy group. First let's see what the labels are for these groups by executing
+
+```         
+levels(puppy_tib$dose)
+```
+
+```         
+## [1] "No puppies" "15 mins"    "30 mins"
+```
+
+These values give us the text that we need to use as first_group and second_group in the code. This gives us
+
+```         
+puppy_tib |>   
+  dplyr::filter(dose == "No puppies" | dose == "15 mins") |>   
+  effectsize::hedges_g(happiness ~ dose, data = _)
+```
+
+Remember that if the default options of a function are the ones you want to use then you can omit them. In this case, if we want to use the pooled standard deviation then we can omit the default value of pooled_sd = TRUE and because we do not have paired data we can omit paired = FALSE.
+
+```{r}
+levels(puppy_tib$dose)
+```
+
+```{r}
+puppy_tib |>
+  dplyr::filter(dose == "Control" | dose == "15 mins") |>
+  effectsize::hedges_g(happiness ~ dose, data = _) |> 
+  knitr::kable(digits = 3)
+
+puppy_tib |>
+  dplyr::filter(dose == "Control" | dose == "30 mins") |>
+  effectsize::hedges_g(happiness ~ dose, data = _)|> 
+  knitr::kable(digits = 3)
+
+puppy_tib |>
+  dplyr::filter(dose == "15 mins" | dose == "30 mins") |>
+  effectsize::hedges_g(happiness ~ dose, data = _)|> 
+  knitr::kable(digits = 3)
+```
+
+::: callout-tip
+## Report
+
+Participants were significantly more happy after 30-minutes of puppy therapy compared to no puppies, M_difference = -2.80 \[-5.27, -0.33\], *t* = -3.16, *p* = 0.025, g\^ = -1.74 \[-3.11, -0.31\]. The effect size was suspiciously large. There was no significant difference in happiness between those exposed for 15-minutes compared to no puppies, M_difference = -1.00 \[-3.47, 1.47\], *t* = -1.13, *p* = 0.282, g\^ = -0.69 \[-1.84, 0.49\] although the effect was large. Also, there was no significant difference in happiness between those exposed for 15-minutes compared to 30-minutes, M_difference = -1.80 \[-4.27, 0.67\], *t* = -2.03, *p* = 0.130, g\^ = -1.12 \[-2.34, 0.15\] although the difference was greater than a standard deviation.
+:::
+
+## Robust Models
+
+### Heteroscedasticity-consistent Methods
+
+Welchs *F* is a robust variant of the *F*-statistic which can be obtained using the `oneway.test()` function which comes as part of .
+
+The format of this function is the same as `lm()`:
+
+```         
+oneway.test(outcome ~ predictor, data = my_data)
+```
+
+```{r}
+oneway.test(happiness ~ dose, data = puppy_tib)
+```
+
+Note that the error degrees of freedom have been adjusted---you should remember this when you report the values. For these data, Welchs *F*(2, 7.94) = 4.23, *p* = .054, which is just about non-significant. If we were using this test it would imply that the mean happiness did not differ significantly across different puppy therapy groups.
+
+We can get robust parameter estimates using `lmRob()` and robust tests of these parameters using `model_parameters()` as described **discovr_08** and the book chapter.
+
+Because we ran trend analysis earlier, need to reset the contrast for dose to match the planned comparisons
+
+```{r}
+contrasts(puppy_tib$dose) <- cbind(puppy_vs_none, short_vs_long)
+```
+
+```{r}
+puppy_rob <- robust::lmRob(happiness ~ dose, data = puppy_tib)
+summary(puppy_rob)
+```
+
+The bottom of the output shows significance tests of bias. These tests suggest that bias in the original model is not problematic (because the p-value for these tests are not significant) but given we have a tiny sample size (5 per group) you can take these tests with a pinch of salt. More important, the robust parameter estimates are identical to the original ones, the standard errors haven't changed much and the profile of significance is the same (compare with your earlier output). In short, the robust estimates and test confirm the findings from the non-robust model.
+
+To get a summary of an existing model like puppy_lm that uses heteroscedasticity-consistent standard errors (i.e. robust significance tests and confidence intervals), we put the model into `model_parameters()` and set vcov = "HC4".
+
+```{r}
+parameters::model_parameters(puppy_lm, vcov = "HC4") |> 
+  knitr::kable(digits = 3)
+```
+
+When we fit the model with heteroscedasticity-consistent standard errors, the significance tests change but we are again left with a profile of results that show that happiness is significantly lower for the no puppy group than both puppy groups combined, but not significantly different after 30-minutes compared to 15.
+
+## Methods Based on Trimmed Means
+
+A different approach is to use these functions from the WRS2 package (Mair and Wilcox 2019):
+
+-   `t1way()`: is a test of trimmed means
+
+-   `lincon()`: *post hoc* tests for trimmed means
+
+-   `t1waybt()`: a variant of `t1way` that also uses a bootstrap
+
+-   `mcppb20()`: *post hoc* tests for `t1waybt()`
+
+#### **Code example**
+
+These functions have a lot of arguments in common, so lets look at all of their general forms:
+
+```         
+t1way(outcome ~ predictor, data = my_tibble, tr = 0.2, nboot = 100) 
+lincon(outcome ~ predictor, data = my_tibble, tr = 0.2) 
+t1waybt(outcome ~ predictor, data = my_tibble, tr = 0.2, nboot = 599) 
+mcppb20(outcome ~ predictor, data = my_tibble, tr = 0.2, nboot = 599)
+```
+
+All of the functions take the same input as `lm()`, that is you specify the predictor and outcome, and the tibble containing the data. They all have an argument tr that is the proportion of trimming to be done and defaults to 20% (0.2 as a proportion). Some of them also have a nboot argument that controls the number of bootstrap samples. The defaults are fine although I usually increase the number of bootstrap samples to 1000.
+
+::: callout-note
+## On Conducting These Tests
+
+You wouldn't normally conduct all of these tests; you'd either do `t1way()` with `lincon()` or `t1waybt()` with `mcppb20()`.
+:::
+
+```{r}
+WRS2::t1way(happiness ~ dose, data = puppy_tib, nboot = 1000)
+WRS2::lincon(happiness ~ dose, data = puppy_tib)
+```
+
+The overall test suggests a non-significant difference between trimmed means across the therapy groups, F_t(2, 4) = 3, *p* = .16. The *post hoc* tests (which we should ignore anyway because the overall effect is not significant) show no significant differences between pairs of trimmed means. The value of psyhat (ψ\^) and its confidence intervals reflect the difference between trimmed means. Note that the confidence intervals are corrected for the number of tests, but the *p*-values are not. As such, we should ascertain significance from whether or not the confidence intervals cross zero. In this case they all do, which implies that none of the groups are significantly different. This is different to what we found when we did not trim the means (see the earlier model).
+
+## Bayes Factors
+
+Like in previous tutorials (**discovr_08**, **discovr_09**) we can use the `BayesFactor` package (Morey and Rouder 2022). In this scenario we use the `anovaBF()` function.
+
+The `anovaBF()` function has basically the same format as most of the other functions in this tutorial:
+
+```         
+my_model <- BayesFactor::anovaBF(formula = outcome ~ predictor,
+                                data = my_tib,
+                                rscaleFixed = "medium",
+                                whichModels = "withmain")
+```
+
+The function uses default priors that can be specified as a number or as "medium" (the default), "wide", and "ultrawide". These labels correspond to *r* scale values of 1/2, √2/2 and 1.
+
+```{r}
+puppy_bf <- BayesFactor::anovaBF(formula = happiness ~ dose,
+                                 data = puppy_tib,
+                                 rscaleFixed = "medium")
+
+puppy_bf
+```
+
+The Bayes factor compares the full model (predicting happiness from dose and the intercept) to the null model (predicting happiness from only the intercept). It, therefore, quantifies the overall effect of dose. The Bayes Factor is 3.07, which means that the data are 3.07 times more likely under the alternative hypothesis (dose of puppy therapy has an effect) than under the null (dose of puppy therapy has no effect). This value is not strong evidence, but nevertheless suggests we should shift our belief about puppy therapy towards it being effective by a factor of about 3.

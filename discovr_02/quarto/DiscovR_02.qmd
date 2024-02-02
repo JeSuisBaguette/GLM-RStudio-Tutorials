@@ -1,0 +1,368 @@
+---
+title: "Dicovr_02"
+author: "Ferdinand Edward Bitan"
+format: 
+  html:
+    self-contained: true
+    theme: darkly
+    toc: true
+    code-fold: true
+knitr: 
+  opts_chunk: 
+    warning: false
+    message: false
+editor: visual
+---
+
+# Discovr_02
+
+## Libraries
+
+```{r}
+library(tidyverse)
+library(datawizard)
+library(here)
+library(knitr)
+```
+
+## Data
+
+```{r}
+ice_tib <- here::here("data/ice_bucket.csv") |> readr::read_csv()
+```
+
+## Frequency Distributions
+
+### Frequency Table
+
+-   `group_by()`: groups the data by whatever variable (or variables) you name within the function.
+
+-   `summarise()`: creates a summary table based on whatever variables you create within the function
+
+-   `n()`: counts the number of scores
+
+```{r}
+freq_tbl <- ice_tib |> 
+  dplyr::group_by(upload_day) |> 
+  dplyr::summarise(
+    frequency = n()
+  )
+freq_tbl
+```
+
+### Grouped Frequency
+
+We can create these bins using `ggplot2::cut_width()` which takes this form:
+
+```         
+ggplot2::cut_width(variable, width_of_bin)
+```
+
+In which we place the variable that we wish to spread across bins, and width_of_bin is how wide we want the bins to be. If we want to split the variable **upload_day** into bins containing 4 days worth of data we'd use:
+
+```         
+ggplot2::cut_width(upload_day, 4)
+```
+
+Combining this function with `dplyr::mutate()` to create a new variable called **days_group**, we could execute:
+
+```{r}
+gp_freq_dist <- ice_tib |> 
+  dplyr::mutate(
+    days_group = ggplot2::cut_width(upload_day, 4)
+  )
+gp_freq_dist
+```
+
+Having done this we can again use `summarize()` and `n()` to count the scores like we did before. However, this time we want to group the summary by **days_group** instead of **upload_day**. 
+
+```{r}
+gp_freq_dist <- ice_tib |> 
+  dplyr::mutate(
+    days_group = ggplot2::cut_width(upload_day, 4)
+    ) |> 
+  dplyr::group_by(days_group) |> 
+  dplyr::summarise(
+    frequency = n()
+  )
+gp_freq_dist
+```
+
+### Relative Frequencies
+
+If we want to calculate the relative frequency (i.e., the proportion of videos uploaded during each of the time periods represented by the bins) we can use `dplyr::mutate()` to add a variable that divides the frequency by the total number of videos uploaded. We can find this total using `sum()`.
+
+```{r}
+gp_freq_dist <- gp_freq_dist  %>% 
+  dplyr::mutate(
+    relative_freq = frequency/sum(frequency)
+  )
+gp_freq_dist
+```
+
+### Efficient Code
+
+```{r}
+gp_freq_dist <- ice_tib |> 
+  dplyr::mutate(
+    days_group = ggplot2::cut_width(upload_day, 4)
+    ) |> 
+  dplyr::group_by(days_group) |> 
+  dplyr::summarise(
+    frequency = n()
+  ) |> 
+  dplyr::mutate(
+    relative_freq = frequency/sum(frequency),
+    percent = relative_freq*100
+  )
+gp_freq_dist
+```
+
+## Histograms
+
+### A Basic Histogram
+
+```         
+`ggplot2::ggplot(my_tib, aes(variable_for_x_axis, variable_for_y_axis))`
+```
+
+Within the `ggplot()` function replace my_tib with the name of the tibble containing the data you want to plot, and within the `aes()` function replace variable_for_x_axis with the name of the variable to be plotted on the *x*-axis (horizontal), and replace variable_for_y_axis with the name of the variable to be plotted on the *y*-axis (vertical).
+
+```{r}
+ggplot2::ggplot(ice_tib, aes(upload_day))
+```
+
+The completed command tells to take the object created by `ggplot2::ggplot(ice_tib, aes(upload_day))` and add (`+`) a layer to it using `geom_histogram()`.
+
+```{r}
+ggplot2::ggplot(ice_tib, aes(upload_day)) +
+  geom_histogram()
+```
+
+### Changing Bin Widths
+
+By default `ggplot2` constructs the bins of the histogram to be 1/30th the width of the data. You can over-ride this default by specifying binwidth = within the `geom_histogram()` 
+
+```{r}
+ggplot2::ggplot(ice_tib, aes(upload_day)) +
+  geom_histogram(binwidth = 1, fill = "cyan")
+```
+
+### Changing Colour and Transparency
+
+We can change the colour of the bars by including fill = within the `geom_histogram()` function.
+
+You can also make filled objects semi-transparent by using alpha = where alpha is a proportion (i.e., between 0 and 1). For example, if you want the histograms to have 20% opacity you could include alpha = 0.2 in the `geom_histogram()` function (remembering to separate it from other options with a comma).
+
+```{r}
+ggplot2::ggplot(ice_tib, aes(upload_day)) +
+  geom_histogram(binwidth = 1, fill = "#56B4E9", alpha = 0.5)
+```
+
+### Changing Axis Titles
+
+To change the labels on the *x*- and *y*-axis we can use the `labs()` function. To do this, we add a `+` after the `geom_histogram()` function and on the next line type:
+
+```         
+labs(y = "label_for_y_axis", x = "label_for_x_axis")
+```
+
+```{r}
+ggplot2::ggplot(ice_tib, aes(upload_day)) +
+  geom_histogram(binwidth = 1, fill = "#56B4E9", alpha = 0.5) +
+  labs(y = "Frequency", x = "Days since first ice bucket challenge video")
+```
+
+### Changing Theme
+
+To apply a theme we add `+` after the previous function and then type `theme_bw()`, `theme_minimal()`, `theme_bw()`, `theme_classic()` or `theme_dark()`.
+
+```{r}
+ggplot2::ggplot(ice_tib, aes(upload_day)) +
+  geom_histogram(binwidth = 1, fill = "#56B4E9", alpha = 0.5) +
+  labs(y = "Frequency", x = "Days since first ice bucket challenge video") +
+  theme_bw()
+```
+
+## Summarizing Data
+
+### The Mean and Median
+
+```         
+mean(variable, trim = 0, na.rm = FALSE)
+```
+
+Which just says that you need to include a reference to the variable/data that you want the mean for, and that you can set two arguments:
+
+-   trim: allows you to trim the scores before calculating the mean by specifying a value between 0 and 0.5. The default is 0 (no trim), but if you wanted to trim 10% of scores from each end of the distribution you could set trim = 0.1, similarly to trim 20% from each end before computing the mean set trim = 0.2.
+
+-   na.rm: you'll see this argument in many functions, it stands for 'NA remove'. In missing values are denoted as NA (not available), so by setting na.rm = TRUE (or na.rm = T for short) you ask to remove missing values before computing the mean. DO THIS IF DATA HAS MISSING VALUES ELSE THERE WILL BE AN ERROR
+
+```{r}
+mean(ice_tib$upload_day)
+mean(ice_tib$upload_day, na.rm = TRUE)
+
+```
+
+```         
+median(variable, na.rm = FALSE)
+```
+
+```{r}
+median(ice_tib$upload_day)
+```
+
+### Quantifying the "Fit" of the Mean
+
+We can use the functions `var()`, `sd()` to get the variance and standard deviation of the ice bucket scores. These functions behave exactly like `mean()` in that we input the variable for which we want the variance and standard deviation and specify how we treat missing values (by default they are not removed):
+
+```         
+var(variable_name, na.rm = FALSE)  sd(variable_name, na.rm = FALSE)
+```
+
+```{r}
+var(ice_tib$upload_day)
+sd(ice_tib$upload_day)
+```
+
+### The Inter-Quartile Range
+
+We can use the `IQR()` function to obtain the interquartile range of a set of scores. This function has an additional option of type = which allows you to specify one of 8 different ways to calculate the IQR. The default is 7. There is an argument for using type = 8, which uses a method recommended by (Hyndman and Fan 1996).
+
+```         
+IQR(variable_name, na.rm = FALSE, type = 7)
+```
+
+```{r}
+IQR(ice_tib$upload_day, type = 8)
+```
+
+## Creating a Summary Table
+
+So far we have looked at computing individual statistics for a set of scores, but what if we want to combine these values into a table? We can do this using the `summarise()` function.
+
+```         
+ice_tib |>
+dplyr::summarise( 
+median =  median(upload_day), 
+mean =  mean(upload_day),      
+...      
+)
+```
+
+The code feeds the data stored in ice_tib into the `summarise()` function. In this function new variables are created. The first variable we name `median` and it stores the output of `median(upload_day)`. In other words, we create a variable that we chose to call `median` (left hand side of the command) that stores the value of the median of the variable **upload_day** (right-hand side of the command). Similarly, we store the mean upload day in a variable called **mean** and so on. We can add as many new variables as we wish, but for the last variable we create we need to omit the comma at the end of the line (like we do when using `mutate()`).
+
+```{r}
+ice_tib |>
+  dplyr::summarise(
+    median =  median(upload_day),
+    mean =  mean(upload_day),
+    IQR = IQR(upload_day),
+    variance = var(upload_day),
+    std_dev = sd(upload_day)
+    )  
+```
+
+If we want to store this table of summary statistics we can do so by assigning it to a new object. Let's say we want to assign it to an object called upload_summary then we'd add `upload_summary <-` to the beginning of the command
+
+```{r}
+upload_summary <- ice_tib |>
+  dplyr::summarise(
+    median =  median(upload_day),
+    mean =  mean(upload_day),
+    IQR = IQR(upload_day),
+    variance = var(upload_day),
+    std_dev = sd(upload_day)
+    ) 
+upload_summary
+```
+
+## Rounding
+
+### The round() Function
+
+We can use the `round()` function to round values.
+
+The `round()` function takes this form
+
+```         
+round(x, digits = 0)
+```
+
+In which x is the thing we want to round, and digits is the number of decimal places we want (the default is 0, which returns a whole number).
+
+```{r}
+var(ice_tib$upload_day) |>
+  round(3)
+```
+
+If we have a table that only contains numbers, then we can also apply `round()` to the entire table. 
+
+```{r}
+upload_summary <- ice_tib |>
+  dplyr::summarise(
+    median =  median(upload_day),
+    mean =  mean(upload_day),
+    IQR = IQR(upload_day),
+    variance = var(upload_day),
+    std_dev = sd(upload_day)
+    )
+
+upload_summary |> round(2)
+```
+
+### The knitr() Function
+
+We can use the `kable()` function from `knitr` to round an entire table of values.
+
+The code in the previous section works only because every column in the table contains numbers. If one of the columns contained text, or something other than a number, will throw an error because `round()` doesn't know what to do with it. A more straightforward option for tables is to pipe them into the `kable()` function from `knitr()`. It has these main arguments
+
+```         
+knitr::kable(x = my_table,
+digits = number_of_decimal_places,
+row.names = a_list_of_row_names,
+col.names = a_list_of_column_names,
+align,
+caption = "Write a caption"
+)
+```
+
+```{r}
+upload_summary <- ice_tib |>
+  dplyr::summarise(
+    median =  median(upload_day),
+    mean =  mean(upload_day),
+    IQR = IQR(upload_day),
+    variance = var(upload_day),
+    std_dev = sd(upload_day)
+    )
+
+upload_summary |> 
+  knitr::kable(digits = 2,
+        caption = "Summary statistics for the ice bucket challenge."
+        ) 
+```
+
+## Datawizard
+
+If we want a quick set of descriptive statistics we can use the `describe_distribution()` function from the `datawizard` package. It has the following arguments:
+
+```         
+datawizard::describe_distribution(x = my_data,
+select = NULL,
+exclude = NULL,
+centrality = "mean",
+dispersion = TRUE,
+iqr = TRUE,
+range = TRUE,
+quartiles = FALSE,
+include_factors = FALSE,
+ci = NULL)
+```
+
+```{r}
+datawizard::describe_distribution(ice_tib) |> 
+  knitr::kable(digits = 2)
+```
+
+# 

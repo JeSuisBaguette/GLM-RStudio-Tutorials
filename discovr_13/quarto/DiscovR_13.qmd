@@ -1,0 +1,645 @@
+---
+title: "DiscovR_13"
+author: "Ferdinand Edward Bitan"
+format: 
+  html:
+    self-contained: true
+    theme: darkly
+    toc: true
+    code-fold: true
+knitr: 
+  opts_chunk: 
+    warning: false
+    message: false
+editor: visual
+---
+
+# DiscovR_13
+
+## Libraries
+
+```{r}
+library(afex)
+library(BayesFactor)
+library(broom)
+library(car)
+library(effectsize)
+library(emmeans)
+library(here)
+library(ggfortify)
+library(Hmisc)
+library(knitr)
+library(modelbased)
+library(parameters)
+library(sandwich)
+library(tidyverse)
+```
+
+## Data
+
+```{r}
+goggles_tib <- here::here("data/goggles.csv") |>
+  readr::read_csv() |>
+  dplyr::mutate(
+    facetype = forcats::as_factor(facetype) |> forcats::fct_relevel("Unattractive"),
+    alcohol = forcats::as_factor(alcohol)
+  )
+```
+
+```{r}
+xbox_tib <- here::here("data/xbox.csv") |>
+  readr::read_csv() |>
+  dplyr::mutate(
+    game = forcats::as_factor(game) |> forcats::fct_relevel("Static"),
+    console = forcats::as_factor(console) |> forcats::fct_relevel("Xbox One")
+  )
+```
+
+## Beer Goggles
+
+The main example in this tutorial is from (Field 2023), who uses an example of an experimental design with two independent variables (a two-way independent design). The study tested the prediction that subjective perceptions of physical attractiveness become inaccurate after drinking alcohol (the well-known beer-goggles effect). The example is based on research that looked at whether the beer-goggles effect was influenced by the attractiveness of the faces being rated (Chen et al. 2014). The logic is that alcohol consumption has been shown to reduce accuracy in symmetry judgements, and symmetric faces have been shown to be rated as more attractive. If the beer-goggles effect is driven by alcohol impairing symmetry judgements then you'd expect a stronger effect for unattractive (asymmetric) faces (because alcohol will affect the perception of asymmetry) than attractive (symmetric) ones. The data we'll analyse are fictional, but the results mimic the findings of this research paper.
+
+An anthropologist was interested in the effects of facial attractiveness on the beer-goggles effect. She selected 48 participants who were randomly subdivided into three groups of 16: (1) a placebo group drank 500 ml of alcohol-free beer; (2) a low-dose group drank 500 ml of average strength beer (4% ABV); and (3) a high-dose group drank 500 ml of strong beer (7% ABV). Within each group, half (n = 8) rated the attractiveness of 50 photos of unattractive faces on a scale from 0 (pass me a paper bag) to 10 (pass me their phone number) and the remaining half rated 50 photos of attractive faces. The outcome for each participant was their median rating across the 50 photos (These photographs were from a larger pool of 500 that had been pre-rated by a different sample. The 50 photos with the highest and lowest ratings were used.). The data are in goggles_tib, which contains the variables **facetype** (unattractive vs attractive), **alcohol** (placebo, low dose, high dose) and **attractiveness** (the median rating of each participant out of 10).
+
+```{r}
+goggles_tib
+```
+
+Note that there are four variables: the participant's **id**, which is a character variable (note the under the name), the **facetype** in the photo (unattractive or attractive) and the **alcohol** consumption (placebo, low or high), both of which are factors (note the under the names). Finally, the **attractiveness** score is numeric and has the data type 'double' (note the under the name).
+
+The variables **facetype** and **alcohol** are factors (categorical variable), so having read the data file and converted these variables to factors it's a good idea to check that the levels of these variables are in the order that we want: unattractive and attractive for **facetype** and placebo, low high for **alcohol**.
+
+```{r}
+levels(goggles_tib$facetype)
+levels(goggles_tib$alcohol)
+```
+
+## Exploring the Data
+
+```{r}
+goggles_sum <- goggles_tib |> 
+  dplyr::group_by(facetype, alcohol) |> 
+  dplyr::summarize(
+    mean = mean(attractiveness, na.rm = TRUE),
+    `95% CI lower` = mean_cl_normal(attractiveness)$ymin,
+    `95% CI upper` = mean_cl_normal(attractiveness)$ymax
+  )
+
+goggles_sum |> 
+  knitr::kable(digits = 2, caption = "Summary statistics for the beer goggles data")
+```
+
+Note that the mean attractiveness is very similar across the doses of alcohol for the attractive faces, but varies in the unattractive faces.
+
+```{r}
+ggplot2::ggplot(goggles_tib, aes(x = alcohol, y = attractiveness, colour = facetype)) +
+  stat_summary(fun.data = "mean_cl_normal", geom = "pointrange", position = position_dodge(width = 0.2)) +
+  coord_cartesian(ylim = c(0,10)) +
+  scale_y_continuous(breaks = 0:10) +
+  labs(x = "Alcohol consumption", y = "Attractiveness (0-10)", colour = "Type of face") +
+  theme_minimal()
+```
+
+Note again that the mean attractiveness is very similar across the doses of alcohol for the attractive faces, but varies in the unattractive faces.
+
+## The Model
+
+The model we're fitting is as follows:
+
+$$
+attractiveness_i = \hat\beta_0 + \hat\beta_1facetype_i + \hat\beta_2alcohol_i + \hat\beta_3{facetype * alcohol}_i + \epsilon_i
+$$
+
+We can include categorical predictors in the linear model using dummy variables and the function `lm()` as we have done before. However, when looking at *F*-statistics for the overall effect of predictors things get quite complicated as we saw in the previous tutorial. The `lm()` method is useful for when you want control over what the parameter estimates, but it's complicated. A simpler method is to use the `afex` package. We'll start with this method.
+
+## Fitting the Model Using the afex package (DON'T)
+
+When faced with a factorial design (i.e. only categorical predictors) a more user-friendly approach is offered by the `afex` package (stands for analysis of factorial experiments). We're going to use the `aov_4()` function, which the the following format:
+
+```         
+afex::aov_4(outcome ~ predictors + (1|id_variable), data = my_tib)
+```
+
+In short, we specify the model like we would with `lm()`, and replace my_tib with the name of our tibble. There is an additional term in the model, (1\|id_variable), and this tells the function something about the structure of the data. Specifically, it tells the function how scores are clustered. In the current design, scores are clustered within individuals so we would replace id_variable with the variable that uniquely identifies the different participants (this variable is called id). In subsequent tutorials we'll use this argument to specify different types of designs.
+
+Putting all of this together, we could fit the model with this code:
+
+```         
+goggles_afx <- afex::aov_4(attractiveness ~ facetype*alcohol + (1|id), data = goggles_tib) goggles_afx
+```
+
+```{r}
+goggles_afx <- afex::aov_4(attractiveness ~ facetype*alcohol + (1|id), data = goggles_tib)
+goggles_afx
+```
+
+**Using the output above, interpret the effect of facetype.**
+
+This effect means that overall when we ignore how much alcohol had been drunk the type of face being rated did not significantly affect attractiveness ratings
+
+[This effect means that overall when we ignore how much alcohol had been drunk the type of face being rated significantly affected attractiveness ratings.]{.underline}\
+\
+*The main effect of type of face is significant because the p associated with the F-statistic is given as \< .001, which is less than 0.05*
+
+**Using the output above, interpret the effect of alcohol.**
+
+This effect means that overall when we ignore how much alcohol had been drunk the type of face being rated did not significantly affect attractiveness ratings
+
+[This effect means that when we ignore whether the participant rated unattractive or attractive faces the amount of alcohol significantly influenced their attractiveness ratings.]{.underline}\
+\
+*The main effect of alcohol is significant because the p associated with the F-statistic is given as 0.005, which is less than 0.05*
+
+**Using the output above, interpret the significant effect of facetype:alcohol (select ALL that apply).**
+
+[The difference between the mean ratings of attractive and unattractive faces varied as a function of how much alcohol was consumed.]{.underline}
+
+The difference between the mean ratings of attractive and unattractive faces was similar in each alcohol group.
+
+The difference between the mean ratings across the three alcohol groups was similar for attractive and unattractive faces.
+
+[The effect of alcohol on attractiveness ratings was different when rating unattractive faces compared to when rating attractive faces.]{.underline}
+
+Attractiveness ratings were similar regardless of how much alcohol was consumed and whether the face was attractive or not.
+
+The results show significant main effects and interactions for all variables. The main effects are not interesting in the context of the significant interaction effect, so we'll focus on the significant interaction effect. We can interpret this interaction effect using a plot.
+
+### Plots Using afex package
+
+A neat feature of `afex` is that you can get plots of the interaction without needing to do it using `ggplot2` (even though I forced you to do that for practice at the start of the tutorial). Having created an `afex` object we can feed it into the `afex_plot()`, which takes the general form:
+
+```         
+afex::afex_plot(afx_object, x_variable, line_shape_variable, panel_variable)
+```
+
+In which you replace afx_object with the name of the model you fitted with `aov_4()`, x_variable with the predictor you want on the *x*-axis, and line_shape_variable with a predictor that you want to be depicted using different lines/shapes. If you have a third categorical predictor, replace panel_variable with the name of that predictor and its different categories will be displayed across different panels (e.g., `facet_wrap()` style). The result is a `ggplot` object so you can use `ggplot2` code to edit the results, for example, you can apply a standard `ggplot2` theme.
+
+To plot the facetype\*alcohol interaction we could use this code:
+
+```         
+afex::afex_plot(goggles_afx, "alcohol", "facetype")
+```
+
+```{r}
+afex::afex_plot(goggles_afx, "alcohol", "facetype") +
+  labs(x = "Alcohol consumption", y = "Attractiveness rating (0-10)") +
+  theme_minimal()
+```
+
+The plot seems to suggest that attractive stimuli are rated as more attractive than unattractive stimuli in the placebo group, but are rated fairly similarly in the low dose group and very similarly in the high alcohol dose group. Put another way, the beer googles effect seems to being rearing it's head: as more alcohol is consumed the ratings of unattractive faces get more similar to those of attractive faces.
+
+::: callout-tip
+## Report
+
+There was a significant effects of the type of face used, *F*(1, 42) = 15.58, *p* \< 0.001, and the dose of alcohol, *F*(2, 42) = 6.04, *p* = 0.005. However, these effects were superseded by a significant interaction between the type of face being rated and the dose of alcohol, *F*(2, 42) = 8.51, *p* \< 0.001. This interaction suggests that the effect of alcohol is moderated by the type of face being rated (and vice versa). Based on the means (see plot) this interaction supports the 'beer-goggles' hypothesis: when no alcohol is consumed symmetric faces were rated as more attractive than asymmetric faces but this difference diminishes as more alcohol is consumed.
+:::
+
+### Estimated Marginal Means
+
+It's also fairly straightforward to get the means in the plot we've just made using the `emmeans()` function from the `emmeans` package. Place the name of your `afex` model into the function and include a vector of the variable names of predictors.
+
+To get the estimated marginal means for the alcohol\*facetype interaction we would execute:
+
+```         
+emmeans::emmeans(goggles_afx, c("alcohol", "facetype"))
+```
+
+```{r}
+emmeans::emmeans(goggles_afx, c("alcohol", "facetype"))
+
+```
+
+## Fitting the Model Using lm()
+
+You might have noticed that when you used `aov_4()` that a message told you that contrasts had been set using `contr.sum()`. Remember that typically we want Type III sums of squares and these require predictor variables to have independent (or to use the posh term orthogonal) contrasts. Orthogonal means that the numbers used to code groups must sum to zero and cross multiple to sum to zero. By default, `r_proj()` will use dummy coding (0s and 1s) which results in non-orthogonal contrasts. The message is telling you that `aov_4()` has created orthogonal contrasts for you so you don't have to worry about it. In short, `aov_4()` makes it super easy to test the predictors and their interaction without needing to think too much. The price you pay is a lack of flexibility in the contrasts. Which leads us on to the gateway to hell that is using `lm()`.
+
+You can extend everything from discovr_12 to the situation with multiple categorical predictors. Here's how.
+
+### Using Built-in Contrasts
+
+Unlike when using `aov_4()`, when using `lm()` we **do** have to think about setting orthogonal contrasts. The simplest way to ensure orthogonal contrasts is to set them using `contr.sum(n)` replacing the *n* with the number of categories/groups (the sum means that contrasts sum to zero). This is what `aov_4()` did for us.
+
+Using `contr.sum(n)` we could set the contrasts for the two predictors by executing (note that we replace *n* with the number of groups):
+
+```         
+contrasts(goggles_tib$facetype) <- contr.sum(2) contrasts(goggles_tib$alcohol) <- contr.sum(3)
+```
+
+Having done this we'd fit the model. We want to enter the following predictors: facetype, alcohol and the facetype\*alcohol interaction. We learnt how to do this in discovr_10.
+
+Remember that we can specify an interaction term within a model formula in in two ways. Using the current variables of facetype and alcohol, the first is `facetype:alcohol`. Using this method we'd specify the model formula as:
+
+```         
+attractiveness ~ facetype + alcohol + facetype:alcohol
+```
+
+The second method uses a shorthand for adding all main effects and their interactions, which is `facetype*alcohol`. This code will introduce the main effect of facetype, the main effect of alcohol and their interaction. Using this method we'd specify the model formula as:
+
+```         
+attractiveness ~ facetype*alcohol
+```
+
+The two methods for specifying the model formula are interchangeable.
+
+Therefore, to fit the model we'd execute:
+
+```         
+goggles_lm <- lm(attractiveness ~ facetype*alcohol, data = goggles_tib)
+```
+
+Then to get the Type III sums of squares like we did in discovr_12 we'd execute:
+
+```         
+car::Anova(goggles_lm, type = 3)
+```
+
+If we wanted a robust model (using HC3 standard errors) we could specify this within `Anova()`:
+
+```         
+car::Anova(goggles_lm, type = 3, white.adjust = "hc3")
+```
+
+```{r}
+contrasts(goggles_tib$facetype) <- contr.sum(2)
+contrasts(goggles_tib$alcohol) <- contr.sum(3)
+goggles_lm <- lm(attractiveness ~ facetype*alcohol, data = goggles_tib)
+car::Anova(goggles_lm, type = 3) |>   # or car::Anova(goggle_lm, type = 3, white.adjust = "hc3")
+  knitr::kable(digits = 3)
+
+
+```
+
+The results show significant main effects and interactions for all variables. The main effects are not interesting in the context of the significant interaction effect, so we'll focus on the significant interaction effect. We can use the means we computed earlier to start to unpick this interaction. We can also used the `estimate_means()` function from `modelbased` to obtain them, which we met in discovr_12. We have no covariates, so we could execute:
+
+```         
+modelbased::estimate_means(goggles_lm)
+```
+
+To get the means across all combinations of levels of the predictors in the model goggles_lm.
+
+Use `estimate_means()` to obtain means across all combinations of levels of the predictors in the model goggles_lm.
+
+```{r}
+modelbased::estimate_means(goggles_lm)
+
+```
+
+The output contains a message:
+
+```         
+We selected `at = c("facetype", "alcohol")`.
+```
+
+This warning appears because we didn't specify the at argument of `estimate_means()` function, which tells the function the variables for which we want means. In the absence of the at argument, the function assumes we want the means across all combinations of predictors, which is in fact what we want so we can ignore this message. Nevertheless, the message is helpful in reminding us that our instruction has been interpreted as
+
+```         
+modelbased::estimate_means(goggles_lm, at = c("facetype", "alcohol"))
+```
+
+We can see that in the placebo group attractive stimuli are rated as more attractive than unattractive ones, this is also true (but to a lesser extent) in the low dose of alcohol group, but in the high dose of alcohol group the mean attractiveness ratings are similar for the different types of stimuli. In other words, at high doses of alcohol, attractive and unattractive faces are rated as similarly attractive but this isn't the case at lower doses of alcohol or for a placebo dose.
+
+An alternative to `contr.sum(n)` is `contr.helmert(n)`, which will set up a contrast that compares each group to the average of previous groups. For example, our \[alcohol\]{.alt\|} variable has 3 levels: placebo, low dose and high dose, `contr.helmert(3)` for this variable results in:
+
+-   Contrast 1: low vs. placebo
+
+-   Contrast 2: high vs. average of low and placebo groups combined
+
+### Using Manual Contrasts
+
+From the point of view of the *F*-statistics it doesn't matter whether you use `contr.sum()` or `contr.helmert()` but it will affect the parameter estimates (*b*s) and what they represent. You might therefore, want to manually set contrasts like we did in discovr_12.
+
+For the alcohol variable, we might set contrasts similar to the ones in discovr_12, by creating two dummy variables using the contrast coding in the table below. Contrast 1 compares the placebo group to the two alcohol groups combined, and the second contrast compares the low and high alcohol groups. Check back to discovr_12 to understand these codes. (Incidentally, these codes produce a Helmert contrast so in this case you'd get the same results from using `contr.helmert()`)
+
+| Group     | Dummy 1 (Placebo vs. alcohol) | Dummy 2 (Low vs. High) |
+|-----------|-------------------------------|------------------------|
+| Placebo   | -2/3                          | 0                      |
+| Low dose  | 1/3                           | -1/2                   |
+| High dose | 1/3                           | 1/2                    |
+
+For the facetype variable we could simply use a contrast that compares the attractive to unattractive stimuli. If we follow the rules that we learnt about contrast coding we'd:
+
+-   Have k−1 contrasts, and with 2 groups that means a single contrast that compares unattractive (chunk 1) to attractive (chunk 2)
+
+-   Assign one chunk positive weights and the other negative.
+
+-   Assign an initial weight equal to the number of groups in the opposite chunk (1 in both cases)
+
+-   Assign a final weight by dividing the initial weight by the number of groups with non-zero weights (in this case 2)
+
+-   Therefore, we'd assign -1/2 to unattractive stimuli and 1/2 to attractive stimuli (or vice versa)
+
+We can set all of these contrast using the following code:
+
+```         
+alcohol_vs_none <- c(-2/3, 1/3, 1/3) 
+low_vs_high <- c(0, -1/2, 1/2) 
+contrasts(goggles_tib$alcohol) <- cbind(alcohol_vs_none, low_vs_high) 
+contrasts(goggles_tib$facetype) <- c(-1/2, 1/2)
+```
+
+The first three lines set the contrasts for the variable alcohol and the last line sets the contrast for facetype.
+
+Having set the contrasts, we could fit the model using the same code as before.
+
+```{r}
+alcohol_vs_none <- c(-2/3, 1/3, 1/3)
+low_vs_high <- c(0, -1/2, 1/2)
+contrasts(goggles_tib$alcohol) <- cbind(alcohol_vs_none, low_vs_high)
+contrasts(goggles_tib$facetype) <- c(-1/2, 1/2)
+goggles_lm <- lm(attractiveness ~ facetype*alcohol, data = goggles_tib)
+car::Anova(goggles_lm, type = 3) |> 
+  knitr::kable(digits = 3)
+```
+
+The overall results based on the *F*-statistic will be identical to before, however, because we have set up meaningful contrasts we can use the parameter estimates to interpret the interaction.
+
+```{r}
+broom::tidy(goggles_lm) |> 
+  knitr::kable(digits = 3)
+```
+
+There are two key effects here:
+
+-   facetype1:alcoholalcohol_vs_none. This effect compares the effect of contrast 1 for alcohol in the unattractive and attractive stimuli. Imagine we calculate the difference in attractiveness ratings when participants had alcohol (low and high combined) compared to the placebo group, then compared this difference when rating attractive face stimuli compared to when rating unattractive ones. This effect is significant, *p* = 0.002 suggesting that the effect of alcohol (compared to placebo) on ratings is significantly different for attractive and unattractive faces.
+
+-   facetype1:alcohollow_vs_high. This effect compares the effect of contrast 2 for alcohol in the unattractive and attractive stimuli. Imagine we calculate the difference in attractiveness ratings when participants had a low dose of alcohol compared to a high dose, then compared this difference when rating attractive face stimuli compared to when rating unattractive ones. This effect is significant, *p* = 0.014, suggesting that the effect of alcohol (low compared to high dose) on ratings is significantly different for attractive and unattractive faces. From earlier plots, it looks as though the effect of alcohol is significantly stronger for unattractive faces than for attractive ones.
+
+To sum up, the significant interaction is being driven by alcohol consumption (any dose compared to placebo, and high dose compared to low) affecting ratings of unattractive face stimuli significantly more than it affects ratings of attractive face stimuli.
+
+::: callout-tip
+## Report
+
+There was a significant effects of the type of face used, *F*(1, 42) = 15.58, *p* \< 0.001, and the dose of alcohol, *F*(2, 42) = 6.04, *p* = 0.005. However, these effects were superseded by a significant interaction between the type of face being rated and the dose of alcohol, *F*(2, 42) = 8.51, *p* \< 0.001. Contrasts suggested that the difference between ratings of symmetric and asymmetric faces was significantly smaller after any dose of alcohol compared to no alcohol, b\^ = -2.31 \[-3.76, -0.87\], *t* = -3.23, *p* = 0.002, and became smaller still when comparing a high- to a low-dose of alcohol, b\^ = -2.12 \[-3.79, -0.46\], *t* = -2.57, *p* = 0.014. These effects support the 'beer-googles' hypothesis: when no alcohol is consumed symmetric faces were rated as more attractive than asymmetric faces but this difference diminishes as more alcohol is consumed.
+:::
+
+## Simple Effects Analysis
+
+Regardless of whether you fit the model with `lm()` or `aov_4()`, a particularly effective way to break down interactions is simple effects analysis, which looks at the effect of one predictor at individual levels of another. For example, we could do a simple effects analysis looking at the effect of type of face at each level of alcohol. This would mean taking the average attractiveness rating of unattractive faces and comparing it to that for attractive faces after a placebo drink, then making the same comparison after a low dose of alcohol, and then finally for a high dose. By doing so we ask: what is the effect of facetype within each alcohol group?
+
+An alternative is to quantify the effect of alcohol (the pattern of means across the placebo, low dose and high dose) separately for unattractive and attractive faces.
+
+We can do this analysis using the `joint_tests()` function from `emmeans`. You place your model (goggles_afx or goggles_lm) into the function and specify the predictor for which you want an analysis at each level.
+
+For example, if we want to look at the effect of facetype in each level of alcohol, we'd execute:
+
+```         
+emmeans::joint_tests(goggles_afx, "alcohol")
+```
+
+for the model created with `aov_4()` called goggles_afx, and
+
+```         
+emmeans::joint_tests(goggles_lm, "alcohol")
+```
+
+for the model created with `lm()` called goggles_lm.
+
+If we wanted to look at the effect of alcohol separately for attractive and unattractive stimuli, we'd execute:
+
+```         
+emmeans::joint_tests(goggles_afx, "facetype")
+```
+
+for the model created with `aov_4()` called goggles_afx, and
+
+```         
+emmeans::joint_tests(goggles_lm, "facetype")
+```
+
+for the model created with `lm()` called goggles_lm.
+
+```{r}
+emmeans::joint_tests(goggles_lm, "facetype") |> 
+  knitr::kable(digits = 3)
+
+```
+
+**Using the output above, which of the following best describes the results from the simple effects analysis?**
+
+There was a non-significant effect of alcohol on attractiveness ratings for unattractive faces, but a significant effect for attractive ones.
+
+There was a non-significant effect of alcohol on attractiveness ratings for both unattractive and attractive faces.
+
+There was a significant effect of alcohol on attractiveness ratings for both unattractive and attractive faces.
+
+[There was a significant effect of alcohol on attractiveness ratings for unattractive faces, but not attractive ones.]{.underline}
+
+Let's try the simple effects analysis the other way around: obtain the simple effect of facetype separately for each dose of alcohol. Although there is no 'correct' way round to conduct the simple effects, this way makes the most sense (to me) in this example because it allows us to see at each dose of alcohol whether there is a significant difference in ratings of the two types of faces.
+
+```{r}
+emmeans::joint_tests(goggles_lm, "alcohol") |> 
+  knitr::kable(digits = 3)
+
+```
+
+**Using the output above, which of the following best describes the results from the simple effects analysis?**
+
+[There was a significant difference in the ratings of attractive and unattractive faces in the placebo group and the low dose group, but a non-significance difference in the high dose group.]{.underline}
+
+There was a non-significant difference in the ratings of attractive and unattractive faces in all of the groups.
+
+There was a significant difference in the ratings of attractive and unattractive faces in the placebo group, but a non-significance difference in the low and high dose groups.
+
+There was a significant difference in the ratings of attractive and unattractive faces in the placebo group and the high dose group, but a non-significance difference in the low dose group.
+
+There was a significant difference in the ratings of attractive and unattractive faces in all of the groups.
+
+::: callout-tip
+## Report
+
+There was a significant effects of the type of face used, *F*(1, 42) = 15.58, *p* \< 0.001, and the dose of alcohol, *F*(2, 42) = 6.04, *p* = 0.005. However, these effects were superseded by a significant interaction between the type of face being rated and the dose of alcohol, *F*(2, 42) = 8.51, *p* \< 0.001. Simple effects analysis revealed that symmetric faces were rated as significant more attractive than asymmetric faces after no alcohol, *F*(1, 42) = 24.15, *p* \< 0.001, and a low dose, *F*(1, 42) = 7.71, *p* = 0.008, but were rated comparably after a high dose of alcohol, *F*(1, 42) = 0.73, *p* = 0.398. These effects support the 'beer-goggles' hypothesis: the standard tendency to rate symmetric faces as more attractive than asymmetric faces was present at low doses and no alcohol, but was eliminated by a high dose of alcohol.
+:::
+
+## Diagnostic Plots
+
+As with any linear model created with `lm()`, we can use the `plot()` function to produce diagnostic plots from the model. We cannot use this with models created by `afex`.
+
+Remember that `plot()` takes this general form:
+
+```         
+plot(my_model, which = numbers_of_the_plots_you_want)
+```
+
+You can also use `ggplot2::autoplot()` to make pretty versions of the plot. To use this function outside of the tutorial remember to execute `library(ggfortify)`
+
+```{r}
+ggplot2::autoplot(goggles_lm,
+                  which = c(1, 3, 2, 4),
+                  colour = "#5c97bf",
+                  smooth.colour = "#ef4836",
+                  alpha = 0.5,
+                  size = 1) +
+  theme_minimal()
+```
+
+**How would you interpret the *Residual vs. fitted* and *Scale-location* plots?**
+
+Were in trouble: I see heteroscedasticity.
+
+I'm not sure, give me a hint.
+
+[Everything is fine - residuals show homogeneity.]{.underline}\
+\
+*Yes, the red line is fairly flat and the vertical spread of dots is similar as you move along the x-axis.*
+
+**Based on the Q-Q plot, can we assume normality of the residuals?**
+
+Give me a clue
+
+No
+
+[Yes]{.underline}\
+\
+*The dots on the Q-Q plot only deviate slightly from the line at the extremes, which probably indicates a roughly normal distribution.*
+
+**Based on the plot of Cook's distance, are there any influential cases?**
+
+Yes
+
+Maybe
+
+[No]{.underline}
+
+*The largest Cook's distance is about 0.2 which is well below the threshold of 1 at which we'd worry.*
+
+## Robust Models
+
+As for previous linear models(e.g., in **discovr_08**, **discovr_09** and **discovr_11**), we can get robust parameter estimates using `robust::lmRob()` and robust tests of these parameters using `parameters::model_parameters()`. These methods won't work for models created with `afex`.
+
+```{r}
+goggles_rob <- robust::lmRob(attractiveness ~ facetype*alcohol, data = goggles_tib)
+summary(goggles_rob)
+```
+
+The bottom of the output shows significance tests of bias. These tests suggest that bias in the original model is not problematic (because the *p*-value for these tests are not significant - in fact, they are 1, completely not significant). The robust parameter estimates for the interaction terms (facetype1:alcoholalcohol_vs_none and facetype1 : alcohollow_vs_high) have got smaller but are still both significant, so the profile of results doesn't change when robust parameter estimates are used.
+
+Remember from previous tutorials that to get a summary of an existing model like goggles_lm that uses heteroscedasticity-consistent standard errors (i.e. robust significance tests and confidence intervals), we put the model into `model_parameters()` and set vcov = "HC4". 
+
+```{r}
+parameters::model_parameters(goggles_lm, vcov = "HC4") |> 
+  knitr::kable(digits = 3) 
+```
+
+When we fit the model with heteroskedasticity-consistent standard errors the parameter estimates will match the non-robust model but the standard errors, *p*-values and confidence intervals change because these are based on methods robust to heteroscedasticity (the HC4 estimates that we asked for). For the two terms that represent the interaction term (facetype1:alcoholalcohol_vs_none and facetype1 : alcohollow_vs_high) the profile of results is unchanged by using robust standard errors, both terms are significant and have 95% confidence intervals that do not contain 0. The fact that the profile of results is unchanged is not surprising given that the model plots suggested that homoscedasticity could be assumed.
+
+Given the small sample size, we might also consider a bootstrap model of the parameter estimates and their confidence intervals and significance tests. We can obtain these using the `bootstrap_parameters()` function from `parameters`, which takes the general form:
+
+```         
+parameters::bootstrap_parameters(my_model)
+```
+
+In which we replace my_model with the name of the object containing the nonrobust model (in this case goggles_lm)
+
+```{r}
+parameters::bootstrap_parameters(goggles_lm) |> 
+  knitr::kable(digits = 3)
+```
+
+The estimates themselves are quite similar to those from the non-robust model and both terms for the interaction (facetype1:alcoholalcohol_vs_none and facetype1 : alcohollow_vs_high) are again significant.
+
+## Effect Sizes
+
+We can interpret the *b*s from the model as raw effect sizes (and there's a lot to be said for doing that). However, in previous tutorials we have seen that we can obtain effect sizes for the overall effect of a predictor (i.e. effect sizes that relate to the *F*-statistics for each predictor).
+
+Specifically, we can use the `eta_squared()` and `omega_squared()` functions from the `effectsize` package (Ben-Shachar, Lüdecke, and Makowski 2020; Ben-Shachar et al. 2022), which take the general form:
+
+```         
+effectsize::eta_squared(anova_object, partial = TRUE, ci = 0.9) 
+effectsize::omega_squared(anova_object, partial = TRUE, ci = 0.9)
+```
+
+All we do is put the object into the function (or pipe it in). By default you'll get partial eta-squared (η\^2_p) and partial omega-squared (ω\^2_p), but you can get the non-partial version by setting partial = FALSE, and you'll get a 90% confidence interval, which you might want to change to some other value.
+
+The function uses the sums of squares from the object that is passed into it, so its safest to re-use our earlier code with `car::Anova()` where we set the sums of squares and pipe it into the function. Try this below.
+
+```{r}
+car::Anova(goggles_lm, type = 3) |> 
+  effectsize::eta_squared(ci = 0.95) |> 
+  knitr::kable(digits = 3)
+```
+
+If you fitted the model with `afex` you can pipe the model goggles_afx directly into the function:
+
+```{r}
+goggles_afx |> 
+  effectsize::eta_squared(ci = 0.95) |> 
+  knitr::kable(digits = 3)
+```
+
+Partial Omega Squared computation:
+
+```{r}
+car::Anova(goggles_lm, type = 3) |> 
+  effectsize::omega_squared(ci = 0.95) |> 
+  knitr::kable(digits = 3)
+```
+
+The effect sizes are slightly smaller than (as we'd expect) using omega-squared. The interaction effect now explains about 25% of variation in attractiveness ratings.
+
+::: callout-tip
+## Report
+
+There was a significant effects of the type of face used, *F*(1, 42) = 15.58, *p* \< 0.001, ω\^2_p = 0.23 \[0.07, 1.00\], and the dose of alcohol, *F*(2, 42) = 6.04, *p* = 0.005, ω\^2_p = 0.17 \[0.02, 1.00\]. However, these effects were superseded by a significant interaction between the type of face being rated and the dose of alcohol, *F*(2, 42) = 8.51, *p* \< 0.001, ω\^2_p = 0.24 \[0.06, 1.00\]. This interaction suggests that the effect of alcohol is moderated by the type of face being rated (and vice versa). Based on the means (see plot) this interaction supports the 'beer-goggles' hypothesis: when no alcohol is consumed symmetric faces were rated as more attractive than asymmetric faces but this difference diminishes as more alcohol is consumed.
+:::
+
+## Bayes Factors
+
+Like in previous tutorials (**discovr_08**, **discovr_09**, **discovr_11**, **discovr_12**) we can use the `BayesFactor` package (Morey and Rouder 2018). For factorial designs we use the `lmBF()` function.
+
+We saw in **discovr_12** that the `lmBF()` function has this format:
+
+```         
+my_model <- BayesFactor::lmBF(formula = outcome ~ predictor,
+                              data = my_tib,
+                              rscaleFixed = "medium",
+                              rscaleCont = "medium")
+```
+
+We also saw that `lmBF()` uses default priors for categorical variables (rscaleFixed) that can be specified as a number or as "medium" (the default), "wide", and "ultrawide". These labels correspond to *r* scale values of 1/2, 2√/22/2, and 1. We could, therefore, obtain a Bayes factor for the entire model with the following code:
+
+```         
+goggles_bf <-  BayesFactor::lmBF(formula = attractiveness ~ alcohol*facetype,
+                                data = goggles_tib,
+                                rscaleFixed = "medium")
+```
+
+However, we are more interested in quantifying the individual effects than the model overall, and in particular the interaction effect. Therefore, we're going to build three models: (1) **alcohol** as the only predictor; (2) a model that adds **facetype** as a predictor; (3) a model that adds the interaction term (**alcohol:facetype**). Having created these models, we'll compare them. So, we'll start by looking at the Bayes factor for **alcohol** as the sole predictor, then get the Bayes factor for what **facetype** adds to the model, then finally get the Bayes factor for what the interaction term adds to the model.
+
+To create these models we'd use
+
+```         
+alcohol_bf <- BayesFactor::lmBF(formula = attractiveness ~ alcohol, data = goggles_tib)
+
+facetype_bf <-  BayesFactor::lmBF(formula = attractiveness ~ alcohol + facetype, data = goggles_tib)  
+
+int_bf <- BayesFactor::lmBF(formula = attractiveness ~ alcohol + facetype + alcohol:facetype, data = goggles_tib)
+```
+
+The first line creates the model with only **alcohol** as a predictor and stores it in the object alcohol_bf, the second line adds **facetype** as a predictor and stores it in the object facetype_bf and the third line adds the interaction term to the model and stores it in the object int_bf. Having created the models we can compare them using this code:
+
+```         
+alcohol_bf 
+facetype_bf/alcohol_bf 
+int_bf/facetype_bf
+```
+
+The first line gives us the Bayes factor for the model with only **alcohol** as a predictor, the second shows us the Bayes factor for the model with **facetype** added as a predictor *relative* to the model that has only alcohol as a predictor. In other words, it tells us what **facetype** adds to the model or, put another way, it quantifies the effect of **facetype** adjusting for **alcohol**. The third line shows us the Bayes factor for the model including all main effects and the interaction term *relative* to the model with only the main effects. This tells us what the **alcohol:facetype** interaction adds to the model above and beyond the main effects. Put another way, it's the Bayes factor for the interaction term, which is what we're interested in.
+
+```{r}
+alcohol_bf <- BayesFactor::lmBF(formula = attractiveness ~ alcohol, data = goggles_tib)
+
+facetype_bf <-  BayesFactor::lmBF(formula = attractiveness ~ alcohol + facetype, data = goggles_tib)
+
+int_bf <- BayesFactor::lmBF(formula = attractiveness ~ alcohol + facetype + alcohol:facetype, data = goggles_tib)
+
+alcohol_bf
+facetype_bf/alcohol_bf
+int_bf/facetype_bf
+```
+
+The Bayes factors in facetype_bf and int_bf are computed using a sampling process and so will change each time you run the code. 
+
+Looking at the first Bayes factor, the data are 1.96 times more likely under the alternative hypothesis (attractiveness is predicted from the dose of alcohol) than under the null (the dose of alcohol does not predict attractiveness ratings). Our beliefs that the dose of alcohol affects attractiveness ratings should increase by a factor of about 1.96 -- in other words it should move away from the null. This value is fairly weak evidence, but then again we're not interested in this effect because it collapses across the type of face being rated.
+
+Looking at the second Bayes factor, the data are 23.62 times more likely under the model that predicts attractiveness ratings from the type of face and dose of alcohol than under the model that predicts attractiveness from the dose of alcohol alone. In other words, our beliefs that the type of face being rated affects ratings of attractiveness should shift away from the null by a factor of 23.62 (a substantial change and strong evidence).
+
+Looking at the final Bayes factor, the data are 40.69 times more likely under the model that predicts attractiveness ratings from the combined effect of the type of face and the dose of alcohol than under the model that predicts attractiveness from the main effects of dose of alcohol and type of face. In other words, our beliefs that the type of face moderates the effect of alcohol on the ratings of attractiveness should shift away from the null by a factor of 40.69 (a substantial change and strong evidence).

@@ -1,0 +1,524 @@
+---
+title: "DiscovR_06"
+author: "Ferdinand Edward Bitan"
+format: 
+  html:
+    self-contained: true
+    theme: darkly
+    code-fold: true
+    toc: true
+knitr: 
+  opts_chunk: 
+    warning: false
+    message: false
+editor: visual
+---
+
+# The Beast of Bias
+
+```{r}
+library(datawizard)
+library(here)
+library(knitr)
+library(qqplotr)
+library(tidyverse)
+```
+
+## Data
+
+```{r}
+download_tib <- here::here("data/download_festival.csv") |> 
+  readr::read_csv()
+```
+
+## Preparing Data
+
+We need to convert the ticket number to a character variable (so R doesn't confuse it for a number) and convert gender to a categorical variable and set the order of factor levels to match the data in the R package. To do all of this, execute the following code:
+
+```{r}
+download_tib <- download_tib |> 
+  dplyr::mutate(
+    ticket_no = as.character(ticket_no),
+    gender = forcats::as_factor(gender) |> 
+      forcats::fct_relevel("Male", "Female", "Non-binary")
+  )
+
+download_tib
+```
+
+## **Wide (Messy) vs. Long (Tidy) data**
+
+Data is considered wide when scores from a single entity appear in a single row and levels of independent or predictor variables are arranged over different columns. In other words, if some or all columns in a data-set are levels of a factor, it is considered wide. The data-set above is wide data as hygiene scores on different days are spread across different columns rather than being in a single column with an additional column to indicate the day of the festival that the hygiene score was measured.
+
+On the other hand, data is considered long when they are arranged such that scores on a variable appear in a single column and rows represent a combination of the attributes of those scores- the entity from which the scores came, when the score was recorded, etc. In other words, if each variable is in its own column and each observation is in its own row, the data-set is considered long.
+
+## Restructuring Data
+
+### Messy to Tidy
+
+The `pivot_longer()` function takes this general form:
+
+```         
+tidyr::pivot_longer(
+data = tibble,
+cols = column_names,
+names_to = "name_of_column_to_contain_variable_names",
+values_to = "name_of_column_to_contain_values",
+)
+```
+
+In which tibble is the name of the messy tibble that you want to make tidy and column_names is a list of columns that you want to restructure into rows. The columns to be converted into rows have a name and values within each column associated with each case/entity. During restructuring, these properties will be split into two columns/variables, one containing the value for a particular case and one containing the name of the original column from which that value came. We use names_to to specify a name for the new variable that contains the names of the original columns, and value_to to specify a name for the new variable that will contain the values.
+
+Within the download data we have three columns/variables (**day_1**, **day_2** and **day_3**) that we want to restructure into rows. We can specify these variables using day_1:day_3 or c(day_1, day_2, day_3). The scores in each of these columns represent hygiene scores, so we might use **hygiene** as the name for the variable created to contain the values after restructuring. Similarly, the columns we're transforming all represent different days at the festival so we might use **day** as the name the variable created to contain these column names. The resulting code would be:
+
+```{r}
+download_tidy_tib <- download_tib |> 
+  tidyr::pivot_longer(
+  cols = day_1:day_3,
+  names_to = "day",
+  values_to = "hygiene"
+)
+download_tidy_tib
+```
+
+The values in **day** match the original column names exactly ('day_1'), which sucks because in a table or plot you'd probably want to have an upper case 'd' and a space instead of an underscore ('Day 1'). We can convert the value of **day** using two functions from the `stringr` package using this code:
+
+```         
+download_tidy_tib <- download_tidy_tib |>
+dplyr::mutate(
+day = stringr::str_to_sentence(day) |> 
+stringr::str_replace("_", " ")   
+)
+```
+
+This code recreates download_tidy_tib from itself after using mutate to recreate the variable **day**. This variable is recreated from itself after passing through two functions. First, it is passed through `str_to_sentence()`, which capitalizes the 'd'. Next, it is piped into `str_replace()` which searches for an underscore and replaces it with a space. In general, `str_replace()` takes the form:
+
+```         
+str_replace(string = "text_or_variable",
+            pattern = "pattern_to_replace",
+            replacement = "replace_it_with")
+```
+
+When used within a pipe the stuff coming through the pipe is assigned to the string argument so we don't need to specify it explicitly, we set pattern to "\_" (it will find the underscore), and we set replacement to " " (it replaces the underscore with a space). The result is `stringr::str_replace("_", " ")`.
+
+```{r}
+download_tidy_tib <- download_tidy_tib |> 
+  dplyr::mutate(
+    day = stringr::str_to_sentence(day) |> 
+      stringr:: str_replace("_", " ")
+  )
+download_tidy_tib
+```
+
+### Tidy to Messy
+
+The `pivot_wider()` function reverses the process we've just been through by restructuring rows into columns. It's general form is:
+
+```         
+tidyr::pivot_wider(
+data = tibble,
+id_cols = variables_that_you_do_not_want_to_restructure,
+names_from = "variable_containing_the_names_of_columns",
+values_from = " variable_containing_the_scores",
+)
+```
+
+Let's return the tidy version of the download data to messy format. You use id_cols to define any variables that you won't want to be included in the restructuring (in this case **ticket_no** and **gender**). We use names_from to tell the function from where to take the column names (in the tidy data column names are stored in the variable **day**) and values_from to tell the function from where to get the scores (in the tidy data values are in the variable **hygiene**).
+
+```{r}
+download_tib <- download_tidy_tib |> 
+  tidyr::pivot_wider(
+    id_cols = c(ticket_no, gender),
+    names_from = "day",
+    values_from = "hygiene"
+  )
+download_tib
+```
+
+### Lambda Functions
+
+#### What are Lambda Functions?
+
+When we use a function like `mean()` we are accessing some code that someone else has written that computes a mean. We usually place something in the brackets, there are known as inputs or arguments. We can write our own functions like using this general format
+
+```         
+name_of_function <- function(input, another_input){what_to_do_with_the_inputs}
+```
+
+For example, to create a function that adds two numbers we could execute
+
+```         
+add_2_things <- function(first_number, second_number){first_number + second_number}
+```
+
+This code creates a new function called `add_2_things()`. The stuff in brackets tells the function to expect two inputs/arguments. I've called the first input first_number and the second second_number. The stuff in the curly braces then tells the function what to do with these inputs (in this case it adds the two inputs). The names I assigned to the inputs are arbitrary, these two versions of the code are equivalent to each other and to the code above
+
+```         
+add_2_things <- function(x, y){x + y} 
+add_2_things <- function(alice, milton){alice + milton}
+```
+
+In each case we have changed the names of the inputs and carried those changes into the curly brackets. The function we have just created is called a named function because we assigned it a name (`add_2_things()`) and because it has a name, we can use it within our session like any other function. For example, we can add the numbers 52 and 79 by executing
+
+```         
+add_2_things(first_number = 52, second_number = 79)
+```
+
+or equivalently
+
+```         
+add_2_things(52, 79)
+```
+
+In each case the function returns the result (in this case 131). Sometimes, we need a function for a specific purpose and don't need to name it. In this case we create an anonymous function, also known as a lambda function. To create one of these we use this syntax
+
+```         
+\(input) {what_to_do_with_the_input}
+```
+
+Note that because we're not assigning the function a name we use `\()` as shorthand for `function()`. It's also not necessary to use the curly braces if the contents of the function is a single line of code. The anonymous function below squares whatever number you put into it
+
+```         
+\(x) {x^2}
+```
+
+Again, x is an arbitrary label. This code is equivalent
+
+```         
+\(number) {number^2}
+```
+
+but by labelling the input as `number` we make the code more readable because it we can see that the function expects a number as its input `\(number)` and squares whatever that number is as its output `{number^2}`.
+
+```{r}
+add_2_things <- function(x, y){x + y}
+add_2_things(52, 79)
+\(x) {x^2}
+```
+
+#### Changing the Data back
+
+When we made the data long we renamed the days from the format where everything was lower case with no spaces (e.g., **day_1**) to a format that used sentence case and replaced the underscore with a space (e.g., **Day 1**). When converting back from long to wide, the variable names are taken from the variable **day** and so will be in the format **\`Day 1\`**, **\`Day 2\`** and **\`Day 3\`**. This is not convenient to work with because to deal with the spaces in the name will always have to enclose the variable name in backticks. For example, so we'd want to convert them back to their original names using `rename_with` from the `dplyr` package, which allows us to select some columns and rename them using a function.
+
+```         
+dplyr::rename_with(.cols = the_columns_i_want_to_rename,
+                    .fn = a_function_to_rename_them
+  )
+```
+
+All of the variables we want to rename begin with the word *Day* so we can take advantage of the function `starts_with` from the `tidyr` package, which will select any columns starting with whatever text we specify. In this case,
+
+```         
+.cols = starts_with("Day")
+```
+
+will select all of the columns that start with the word *Day* (note we need to use an upper case D because the function is case sensitive). Next we want to apply a function to the names to change them. Essentially, we want to find the text pattern *'Day'* (note the included space) and replace it with *'day\_'* (note the underscore and lower case d). In doing so *'Day 1'* will become, *'day_1'*, *'Day 2'* will become, *'day_2'* and so on. The `str_replace()` function, which we used earlier does this: it finds a specified pattern of text and replaces it with a different one. We can use this function as follows:
+
+```         
+.fn = \(column) stringr::str_replace(string = column,
+                                    pattern = "Day ",
+                                    replacement = "day_")
+```
+
+Basically we place `str_replace()` into something called an anonymous function (aka a lambda function). Lambda functions are explained in the book but, optionally, read the information box. The code above takes each column in term, finds the text pattern *'Day'* and replaces it with *'day\_'*.
+
+```{r}
+download_tib <- download_tib |> 
+  dplyr::rename_with(.cols = starts_with("Day"),
+                     .fn = \(column){stringr::str_replace(string = column,
+                                                          "Day ",
+                                                          "day_")})
+
+download_tib
+```
+
+## Spotting Outliers
+
+Two ways to spot:
+
+1.  Visualize the data and look for unusual cases
+
+2.  Look for values that our statistical model predicts poorly. We can do this using the model residuals.
+
+Model Residuals: The differences betweent the values a model predicts and the values observed in the data on which the model is based.
+
+### Histograms and Boxplots
+
+```{r}
+ggplot2::ggplot(download_tib, aes(day_1)) +
+  geom_histogram(binwidth = 0.2, fill = "#56B4E9", colour = "#336C8B", alpha = 0.2) +
+  labs(y = "Frequency", x = "Hygiene scores (0-5)", title = "Hygiene scores on day 1") +
+  theme_minimal()
+```
+
+```{r}
+ggplot2::ggplot(download_tib, aes(x = "Day 1", y = day_1)) +
+  geom_boxplot(fill = "#5C97BF", alpha = 0.7) +
+  scale_y_continuous(breaks = seq(0, 20, 2)) +
+  labs(x = "Day of festival", y = "Hygiene scores (0-5)") +
+  theme_minimal()
+```
+
+The resulting histogram and boxplot look odd: there is one case that is very different from the others. It has a value of 20, which is particularly odd because it exceeds the top of our scale (our hygiene scale ranged from 0 to 4). It must be a mistake. The quickest way to find this case is to use the `filter()` function (explained in **discovr_01**) to filter the data using a rule that returns values for the variable **day_1** that are greater than 4 (the maximum of the scale). Doing so will return the one case that for which this is true.
+
+```{r}
+download_tib |> 
+  dplyr::filter(day_1 > 4)
+```
+
+It turns out that the person with ticket number 4158 has a hygiene score of 20.02, which is probably a mistyping of 2.02. We'd have to go back to the raw data and check. We'll assume we've checked the raw data and this score should be 2.02, we need to replace the value 20.02 with the value 2.02 before continuing. We can do this using the `dplyr::recode()` function.
+
+```{r}
+download_tib <- download_tib |> 
+  dplyr::mutate(
+    day_1 = dplyr::recode(day_1, "20.02" = 2.02)
+  )
+download_tib
+```
+
+Having corrected the mis-entered data point in the wide data file (download_tib), we would need to recreate the long version of the data including the corrected score using
+
+```{r}
+download_tidy_tib <- download_tib |> 
+  tidyr::pivot_longer(
+    cols = day_1:day_3,
+    names_to = "day",
+    values_to = "hygiene",
+  )
+download_tidy_tib
+```
+
+Filter download_tib to show only the case with ticket number 4158 to check that their **day_1** hygiene score is now 2.02.
+
+```{r}
+download_tib |> 
+  dplyr::filter(ticket_no == "4158")
+```
+
+Re-plot the histogram and boxplot (you can use exactly the same code as before).
+
+```{r}
+ggplot2::ggplot(download_tib, aes(day_1)) +
+  geom_histogram(binwidth = 0.2, fill = "#56B4E9", colour = "#336C8B", alpha = 0.2) +
+  labs(y = "Frequency", x = "Hygiene scores (0-5)", title = "Hygiene scores on day 1") +
+  theme_minimal()
+```
+
+```{r}
+ggplot2::ggplot(download_tib, aes(x = "Day 1", y = day_1)) +
+  geom_boxplot(fill = "#5C97BF", alpha = 0.7) +
+  scale_y_continuous(breaks = seq(0, 20, 2)) +
+  labs(x = "Day of festival", y = "Hygiene scores (0-5)") +
+  theme_minimal()
+```
+
+Boxplots for all days split by gender
+
+```{r}
+ggplot2::ggplot(download_tidy_tib, aes(day, hygiene, fill = gender)) +
+  geom_boxplot(alpha = 0.7) +
+  scale_y_continuous(breaks = seq(0, 4, 1)) +
+  labs(x = "Day of festival", y = "Hygiene scores (0-5)", fill = "Gender")  +
+  facet_wrap(~ gender) +
+  theme_minimal()
+```
+
+### Standardizing Raw Scores
+
+Any score can be converted to a *z*-score, which has known distributional properties. This section looks at how to use these standardized scores to look for outliers. Everything in this section can be applied to model residuals too (see **discovr_08**). To standardize raw scores we take the score, subtract from it the mean of all scores and divide by the standard deviation of all scores.
+
+We can convert scores to *z*-scores by using `mutate()` alongside functions that compute the mean and standard deviation.
+
+```{r}
+download_tib <- download_tib |> 
+  dplyr::mutate(
+    zday_1 = (day_1 - mean(day_1, na.rm = T))/sd(day_1, na.rm = T),
+    zday_2 = (day_2 - mean(day_2, na.rm = T))/sd(day_2, na.rm = T),
+    zday_3 = (day_3 - mean(day_3, na.rm = T))/sd(day_3, na.rm = T)
+  )
+download_tib
+
+```
+
+### Using a Function to Compute Z
+
+The previous method is fine, but we're writing code to do the same thing multiple times. In situations like this, where we want to convert multiple variables in the same way it can be more efficient to use a function.
+
+```{r}
+make_z <- function(x){
+  (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+}
+
+```
+
+If we use `dplyr::across()` within `mutate()` we can apply our function `make_z()` to multiple variables simultaneously. The function `across()` applies a mutation across certain columns (hence, the name). It works similarly to `rename_with()`, which we used earlier.
+
+In general, you'd use `mutate()` and `across()` in combination like this:
+
+```         
+dplyr::mutate(     
+  dplyr::across(       
+    .cols = variables_we_want_to_mutate,
+    .fn = mutation_to_be_applied,       
+    .names = how_to_name_the_new_variables
+    ) 
+  )
+```
+
+```{r}
+download_tib <- download_tib |> 
+  dplyr::mutate(
+    dplyr::across(.cols = day_1:day_3,
+                  .fn = \(column) make_z(column),
+                  .names = "z{.col}")
+  )
+download_tib
+```
+
+This code pipes the data (download_tib) into the `mutate()` function, inside which it goes into the `across()` function, where three things happen.
+
+-   `.cols = day_1:day_3`. First, we select the variables to mutate across. We specify the variables as day_1:day_3, which means all the variables in the tibble starting with **day_1** and finishing with **day_3**. An alternative would be to use `starts_with("day")`, which selects all of the variables that have a name beginning with the word 'day'.
+
+-   `.fn = \(column) make_z(column)`. Next we send each of the selected columns off to the function we wrote called `make_z()`. We're using a lambda function again here (see earlier), the `\(column)` means 'take each column' (the word column is my choice to remind me what is being passed into the function) and the `make_z(column)` means 'send it off to `make_z()` to get the *z*-scores'. If you care more about quick typing than about readable code then `.fn = \(x) make_z(x)` is equivalent code, if you care more about being arbitrary than readable code then `.fn = \(truculent_swordfish) make_z(truculent_swordfish)` is equivalent.
+
+-   `.names = "z{.col}"`. Finally, by including .names = "z{.col}" the resulting variables will be named after the original columns ({.col} refers to the original column names) but prefixed with 'z' (so, "z{.col}" means *the letter z followed by the original column name*). The new variables (**zday_1**, **zday_2** and **zday_3**) will be stored as the final three columns in the tibble.
+
+### Using Standardized Scores to Detect Outliers
+
+We now have *z*-scores of hygiene on each day of the festival. We can apply a filter to the data so that we see only large values of *z*.
+
+If we want to see only cases with a *z*-score for **day_1** less than −1.96 or greater than 1.96 we could execute:
+
+```         
+download_tib |>
+dplyr::filter(abs(zday_1) >= 1.96) |>
+dplyr::arrange(zday_1)
+```
+
+This code pipes the data into `filter()` where we set the criteria that the absolute value of the variable **zday_1** must be greater or equal to 1.96 (that's what abs(zday_1) \>= 1.96 does). Finally (and optionally) we pipe the tibble into `arrange()` to sort it by **zday_1**, so that the resulting table will list cases from the smallest standardized residual to the largest.
+
+```{r}
+download_tib |> 
+  dplyr::filter(abs(zday_1) >= 1.96) |> 
+  dplyr::arrange(zday_1)
+```
+
+We also want to look at day 2 and day 3. We could do this separately by filtering by each day in turn by adapting the previous code, or we can use the `if_any()` function to apply a condition to multiple variables. The `if_any()` function from `dplyr` allows us to specify a condition and apply it to multiple columns. When used within `filter()` then 'if any' of the columns meet the condition the row is retained. It has the general form
+
+```         
+dplyr::if_any(
+.cols = columns_to_which_i_want_to_apply_the_condition,
+.fn = the_condition_i_want_to_apply
+)
+```
+
+```{r}
+download_tib |> 
+  dplyr::filter(
+    dplyr::if_any(
+      .cols = zday_1:zday_3,
+      .fn = \(column) column >= 2.58
+    )
+  )
+```
+
+Note that within the `filter()` function we use `if_any()` and within that
+
+-   `.cols = zday_1:zday_3` selects the columns containing the *z*-scores of hygiene fro the three days of the festival.
+
+-   `.fn = \(column) column >= 2.58` sets the condition. The `\(column)` says *for each column selected* and `column >= 2.58` says *check whether the values are greater or equal to 2.58*. If the condition is met, the row of that column will be retained.
+
+This code is the same as using the logical operator OR, we're basically saying that if **zday_1** OR **zday_2** OR **zday_3** is greater than or equal to 2.58 then retain the case.
+
+It turns out that there are 8 cases (out of 200) who have *z*-scores greater than or equal to 2.58 on at least one of the days, which is about what we'd expect (4% of cases). There are only two cases with *z*-scores greater than 3.29 (case 3374 on day 2 and case 4564 on days 2 and 3).
+
+## Spotting Normality
+
+### Using Plots to Spot Normality
+
+Frequency distributions are not only good for spotting outliers, they are the natural choice for looking at the shape of the distribution as we saw from plotting the day 1 scores earlier. Two alternatives are a probability-probability plot or P-P plot and a quantile-quantile plot, or Q-Q plot. A P-P plot plots the cumulative probability of a variable against the cumulative probability of a particular distribution (in this case a normal distribution). The data are ranked and sorted, then for each rank the corresponding *z*-score is calculated to create an 'expected value' that the score should have in a normal distribution. Next, the score itself is converted to a *z*-score. The actual *z*-score is plotted against the expected *z*-score. The Q-Q plot does something similar except that it plots the quantiles of the data against the quantiles of the desired distribution instead of every individual score.
+
+The interpretation of these plots is basically the same. If scores follow the desired distribution then the observed *z*-score or quantile will be the same as the *z*-score or quantile that you'd expect from that distribution and the points on the plot will form a straight diagonal line. When scores are normally distributed the dots on the Q-Q plot follow the diagonal line that represents perfect normality and they all fall within the confidence band around that line. If scores are positively skewed then the points of the Q-Q plot sag downwards in the middle, and for negative skew the opposite is true: points curve upwards in the middle. Note that some of the points fall outside of the confidence band around the diagonal line. When there are too many scores in the tails (a heavy-tailed distribution) the points form an S with points curving down below the diagonal line at the left of the *x*-axis and rising above it at the right. The points also form an S when there are too few scores in the tails (a light-tailed distribution) but they curve an S upwards from the diagonal at the left of the *x*-axis and curve downwards from the diagonal at the right. Again, points at the extremes go beyond the confidence band around the diagonal line. If you have a lot of scores Q-Q plots can be easier to interpret than P-P plots because they display fewer values.
+
+We can use the `qqplotr` package,to create a Q-Q plot. We set up the plot much like any other plot:
+
+```         
+ggplot2::ggplot(my_tib, aes(sample = variable_to_plot))
+```
+
+In which you replace my_tib with the name of the tibble containing the data, and variable_to_plot with the name of the variable you want to plot. The main difference to previous plots is that we use the sample argument within `aes()` to specify the variable we want to plot. Having set up the plot, we apply three layers using different functions in this order:
+
+-   `stat_qq_band()`. This function draws a confidence band around the diagonal line. By default, the function uses a confidence interval based on the normal distribution, but you can change this to an interval based on a parametric bootstrap by including bandType = "boot", or a band based on the Kolmorgorov-Smirnov test by including bandType = "ks").
+
+-   `stat_qq_line()`. This function draws the diagonal line representing the idealized distribution.
+
+-   `stat_qq_point()`. This function draws the observed values (the dots).
+
+```{r}
+ ggplot2::ggplot(download_tidy_tib, aes(sample = hygiene)) +
+  qqplotr::stat_qq_band() +
+  qqplotr::stat_qq_line() +
+  qqplotr::stat_qq_point()
+```
+
+This code plots the variable **hygiene** from download_tidy_tib. However, because we have used the tidy version of the data, the values of **hygiene** have come from all three days of the festival. It might be useful to split them according to the day of the festival. Luckily, because `qqplotr` creates ggplot objects, we can easily do this by adding a layer that includes `facet_wrap()` and splits the data by the variable **day**.
+
+```{r}
+ ggplot2::ggplot(download_tidy_tib, aes(sample = hygiene)) +
+  qqplotr::stat_qq_band() +
+  qqplotr::stat_qq_line() +
+  qqplotr::stat_qq_point() +
+  facet_wrap(~day) +
+  theme_minimal()
+```
+
+We can also add labels and titles, and within each function we can set aesthetics such as colours, shapes, sizes, transparency and so on, just as we would with any ggplot object.
+
+```{r}
+ ggplot2::ggplot(download_tidy_tib, aes(sample = hygiene)) +
+  qqplotr::stat_qq_band(fill = "#5c97bf", alpha = 0.3) +
+  qqplotr::stat_qq_line(colour = "#5c97bf") +
+  qqplotr::stat_qq_point(alpha = 0.2, size = 1) +
+  labs(x = "Theoretical quantiles", y = "Sample quantiles") +
+  facet_wrap(~ day) +
+  theme_minimal()
+```
+
+We looked at the day 1 scores earlier with a histogram and concluded that they looked quite normal. The Q-Q plot echoes this view because the data points fall close to the 'ideal' diagonal line and within the confidence band around it. However, the distributions for days 2 and 3 look positively skewed. This can be seen in the Q-Q plots by the data points dipping in the middle to form a curve and points falling outside of the confidence band at the extremes. These plots suggest that relative to day 1, hygiene scores on days 2 and 3 were more clustered around the low end of the scale (more people were less hygienic); so people became smellier as the festival progressed. The skew on days 2 and 3 occurs because a minority insisted on upholding their levels of hygiene over the course of the festival 
+
+### More Summary Statistics
+
+In `discovr_02` and `discovr_04` we used the `describe_distribution()` function to get summary statistics such as the mean, confidence interval, and the IQR. This function also returns values of skew and kurtosis.
+
+```{r}
+download_tib |> 
+  datawizard::describe_distribution(select = day_1:day_3,
+                                    iqr = FALSE,
+                                    range = FALSE,
+                                    ci = 0.95,
+                                    iterations = 500) |> 
+  knitr::kable(digits = 3)
+```
+
+On average, hygiene scores were 1.77 (out of 5) on day 1 of the festival, but went down to 0.96 and 0.98 on days 2 and 3 respectively. For day 1 the skew value is very close to the expected value of zero (which is good) and kurtosis is a little negative. For days 2 and 3, though, there is a skewness of around 1 (positive skew) and kurtosis is positive, suggesting heavier tails than a normal distribution. We can also see that 546 of the original 810 cases are missing on day 2 and 687 are missing at day 3.
+
+### Exploring Multiple Groups
+
+We include **gender** within the `group_by()` function before we pipe it into `describe_distribution()`.
+
+```         
+download_tidy_tib |>
+  dplyr::group_by(gender) |>
+  datawizard::describe_distribution()
+```
+
+```{r}
+download_tib |> 
+  dplyr::group_by(gender) |> 
+  datawizard::describe_distribution(select = day_1:day_3,
+                                    iqr = FALSE,
+                                    range = FALSE,
+                                    ci = 0.95,
+                                    iterations = 500) |> 
+  knitr::kable(digits = 3)
+```

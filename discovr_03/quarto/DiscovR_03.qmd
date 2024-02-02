@@ -1,0 +1,203 @@
+---
+title: "Dicovr_03"
+author: "Ferdinand Edward Bitan"
+format: 
+  html:
+    self-contained: true
+    theme: darkly
+    toc: true
+    code-fold: true
+knitr: 
+  opts_chunk: 
+    warning: false
+    message: false
+editor: visual
+---
+
+# Discovr_03
+
+## Libraries
+
+```{r}
+library(tidyverse)
+library(here)
+library(knitr)
+library(datawizard)
+```
+
+## What is a CI
+
+The estimate of a parameter (e.g., the mean) will differ across samples, and we can use the standard error to get some idea of the extent to which these estimates differ across samples. We can also use this information to calculate boundaries within which we believe the population value will fall. Such boundaries are called confidence intervals. 
+
+Let's imagine that you were particularly fixated with Japanese quail sperm, and you took 100 different samples of social media users. In each sample, you calculate the mean and constructed an interval around it as I've just described. The crucial thing is to construct the intervals in such a way that they tell us something useful. For example, perhaps we might want to know how often, in the long run, an interval contains the true value of the parameter we're trying to estimate (in this case, the population mean). This is what a confidence interval does. Typically, we look at 95% confidence intervals, and sometimes 99% confidence intervals, but they all have a similar interpretation: they are limits constructed such that for a certain percentage of samples (be that 95% or 99%) the true value of the population parameter falls within the limits (on average). So, when you see a 95% confidence interval for a mean, think of it like this: if we'd collected 100 samples, and for each sample calculated the mean and a confidence interval for it then for approximately 95 of these samples, the confidence interval contains the value of the mean in the population, and in approximately 5 of the samples the confidence interval does not contain the population mean. The trouble is, you do not know whether the confidence interval from a particular sample is one of the 95% that contain the true value or one of the 5% that do not.
+
+The parameter estimate (in this case the mean) is always in the centre of the confidence interval. We know that 95% of confidence intervals contain the population value, so we might assume that this confidence interval contains the true mean (but remember this is an assumption and 5% of the time we will be incorrect). Under this assumption, if the interval is small, the sample mean must be very close to the true mean and if the confidence interval is very wide then the sample mean could be very different from the true mean, indicating that the sample estimate is a poor representation of the population.
+
+## CI Explorer
+
+**When the confidence interval width was 95% what did you observe?**
+
+The percentage of samples with confidence intervals that included the population value was never 95%
+
+[The percentage of samples with confidence intervals that included the population value seemed to fluctuate around 95%. Sometimes it was a little more, sometimes a little less.]{.underline}
+
+The percentage of samples with confidence intervals that included the population value was always 95%\
+\
+*This statement should reflect what you'd see. In the long run (i.e. over infinite numbers of samples), the hit rate for 95% confidence intervals will be 95% but in the short run (i.e. for 100 samples) it might be slightly off that value. Try re-doing the exercise 5-10 times but this time note the percentage of samples with confidence intervals that included the population value each time you press 'Take samples'. You should find that if you average these values you get 95% (or close to it) showing that as you atke larger numbers of samples, the percentage of samples with confidence intervals that included the population value converge on 95%.*
+
+**What happened to the percentage of samples with confidence intervals containing the population value as you increased and decreased the confidence interval percentage?**
+
+The percentage of samples with confidence intervals that included the population value was always 95%.
+
+[The percentage of samples with confidence intervals that included the population value seemed to fluctuate around the percentage I set.]{.underline}
+
+The percentage of samples with confidence intervals that included the population value was always the value that I set.\
+\
+*This statement should reflect what you'd see. In the long run (i.e. over infinite numbers of samples), the hit rate for confidence intervals will be the percentage you set but in the short run (i.e. for 100 samples) it might be slightly off that value. Note that as the percentage get higher you get less fluctuation, meaning that you have more certainty that your particular sample contains the population value.*
+
+**What happened to the width of the confidence intervals as the sample size increased?**
+
+[The confidence intervals got narrower.]{.underline}
+
+The confidence intervals got wider.
+
+The width of the confidence intervals stayed the same.\
+\
+*This statement should reflect what you'd see. Large samples typically provide estimates of population values that more closely match the true values. Large sample also typically provide estimates of population values that vary less from sample to sample. Hence you get narrow intervals. Small samples tend to be more different from each other, and have more potential to provide estimates of population values that are more distant from the true values. Hence confidence intervals in small samples tend to be wider than large samples.*
+
+## CI with tidyverse
+
+### A Basic CI
+
+As is often the case with , you have a few options for obtaining confidence intervals. We'll predominantly use two functions called `mean_cl_normal()` and `mean_cl_boot()` from the `ggplot2` package (which is installed with `tidyverse`). The function `mean_cl_normal()` produces a standard confidence interval, whereas `mean_cl_boot()` produces something called a bootstrap confidence interval
+
+```{r}
+insta_tib  <-  tibble::tibble(
+  followers = c(57, 40, 103, 234, 93, 53, 116, 98, 108, 121, 22)
+)
+insta_tib
+```
+
+```         
+ggplot2::mean_cl_normal(object, conf.int = 0.95, na.rm = TRUE) 
+ggplot2::mean_cl_boot(object, conf.int = 0.95, na.rm = TRUE)
+```
+
+in which object is a model being passed into the function, conf.int sets the probability level for the interval (95% by default), and (as in other functions) na.rm determines whether to remove missing values before computing the interval (by default, they are removed, which is helpful because that's usually what you'd want to do).
+
+```{r}
+ggplot2::mean_cl_normal(insta_tib$followers)
+```
+
+The argument to compute a confidence interval is expressed generally as conf.int = proportion in which we replace proportion with a value that represents the percentage associated with the interval. To convert the percentage associated with a confidence interval to a proportion we divide by 100
+
+Therefore, if you want a 95% confidence interval include conf.int = 0.95 within `mean_cl_normal()` or `mean_cl_boot()`, for a 90% confidence interval include conf.int = 0.9, for a 99% confidence interval include conf.int = 0.99 and so on.
+
+```{r}
+ggplot2::mean_cl_normal(insta_tib$followers, conf.int = 0.9)
+```
+
+### Adding CI to Summary Tables
+
+We can add the upper and lower bound of the 95% confidence interval to the summary by extracting the relevant values from the `mean_cl_normal()` function. 
+
+```{r}
+insta_sum <- insta_tib |>
+  dplyr::summarize(
+    Mean =  ggplot2::mean_cl_normal(followers)$y,
+    `95% CI Lower` = ggplot2::mean_cl_normal(followers)$ymin,
+    `95% CI Upper` = ggplot2::mean_cl_normal(followers)$ymax
+    )
+insta_sum
+```
+
+Combining other data
+
+```{r}
+insta_sum <- insta_tib |>
+  dplyr::summarize(
+    Mean = ggplot2::mean_cl_normal(followers)$y,
+    `95% CI Lower` = ggplot2::mean_cl_normal(followers)$ymin,
+    `95% CI Upper` = ggplot2::mean_cl_normal(followers)$ymax,
+    median =  median(followers),
+    range = max(followers) - min(followers),
+    `lower quartile` = quantile(followers, probs = 0.25),
+    `upper quartile` = quantile(followers, probs = 0.75),
+    IQR = IQR(followers),
+    var = var(followers),
+    sd = sd(followers)
+    )
+
+insta_sum |> 
+  knitr::kable(caption = "Summary statistics for the isntagram data",
+               align = 'c', 
+               digits = 2)
+```
+
+**The 95% confidence interval for followers ranges from 56.85 to 133.15. What does this tell us?**
+
+[If this confidence interval is one of the 95% that contains the population value then the mean number of followers in the population lies between 56.85 and 133.15.]{.underline}
+
+There is a 95% chance that the mean number of followers in the population lies between 56.85 and 133.15.
+
+The probability of this confidence interval containing the population value is 0.95.I can be 95% confident that the mean number of followers in the population lies between 56.85 and 133.15.
+
+### Robust CI
+
+Robust CI: cl_boot will estimate the CI by repeatedly taking samples from the data. As a result, slightly different values for the CI will be produced each time.
+
+```{r}
+ggplot2::mean_cl_boot(insta_tib$followers)
+```
+
+Same as above
+
+```{r}
+insta_sum <- insta_tib |>
+  dplyr::summarize(
+    Mean = ggplot2::mean_cl_boot(followers)$y,
+    `95% CI upper` = ggplot2::mean_cl_boot(followers)$ymax,
+    `95% CI lower` = ggplot2::mean_cl_boot(followers)$ymin,
+    median =  median(followers),
+    range = max(followers) - min(followers),
+    `lower quartile` = quantile(followers, probs = 0.25),
+    `upper quartile` = quantile(followers, probs = 0.75),
+    IQR = IQR(followers),
+    var = var(followers),
+    sd = sd(followers)
+    )
+
+insta_sum |> 
+  knitr::kable(caption = "Summary statistics for the Instagram data",
+               align = 'c', #this argument centre aligns the columns
+               digits = 2)
+```
+
+## CI with Datawizard
+
+A quicker method is to use the `describe_distribution()` function from the `datawizard` package.
+
+```         
+datawizard::describe_distribution(x = my_data,
+select = NULL,
+exclude = NULL,   
+centrality = "mean",
+dispersion = TRUE,
+iqr = TRUE,
+range = TRUE,
+quartiles = FALSE,
+include_factors = FALSE,
+ci = NULL,
+iterations = 100)
+```
+
+To include a confidence interval we include the argument ci = proportion in which we replace proportion with a value that represents the percentage of the interval, just like we did with `mean_cl_normal()` earlier on. To recap, for a 95% confidence interval the proportion is 0.95 so you'd include ci = 0.95 within `describe_distribution()`. This function always uses a bootstrap method with a default of 100 bootstrap samples (iterations = 100). This is possibly a little low (but keeps computations fast), so consider increasing it to 500 or even 1000.
+
+```{r}
+datawizard::describe_distribution(insta_tib,
+  ci = 0.95,
+  iterations = 500)  |> 
+    knitr::kable(digits = 2, align = 'c')
+```
+
+# 

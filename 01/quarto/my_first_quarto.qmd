@@ -1,0 +1,110 @@
+---
+title: "Practical 1"
+author: "Ferdinand Edward Bitan"
+format: 
+  html:
+    self-contained: true
+    theme: darkly
+    toc: true
+    code-fold: true
+knitr:
+  opts_chunk: 
+    warning: false
+    message: false
+editor: visual
+bibliography: references.bib
+---
+
+```{r}
+eddie_tib <- here::here("data/eddiefy.csv") |>
+  readr::read_csv()
+eddie_tib
+```
+
+Energy scores in @tbl-energy
+
+```{r}
+#| tbl-cap: Energy scores
+#| label: tbl-energy
+energy_tib <- eddie_tib |>
+  dplyr::select(track_name, energy, valence)
+knitr::kable(energy_tib)
+```
+
+```{r}
+#| tbl-cap: Second Try
+#| label: tbl-pain
+energy_tib <- eddie_tib |>
+  dplyr::select(track_name, energy, valence)
+knitr::kable(energy_tib)
+```
+
+test results can be found in @tbl-pain
+
+# All about Iron Maiden
+
+## Band Members
+
+My two favorite band members are
+
+-   Adrian Smith
+
+-   Dave Murray
+
+## Logo
+
+[![Figure 1: Iron Maiden's logo](images/iron_maiden_logo.png){fig-alt="The logo of the Iron Maiden band" width="458"}](www.ironmaiden.com)
+
+## My favorite albums
+
+1.  [Piece of mind](https://en.wikipedia.org/wiki/Piece_of_Mind)
+
+2.  [The number of the beast](https://en.wikipedia.org/wiki/The_Number_of_the_Beast_(album))
+
+## Lyrics
+
+> *Don't waste your time always searching for those wasted years*
+
+## Some data about Iron Maiden
+
+I got these data using the `spotifyr` package and put them in a table using `tidyverse` [@tidyverse-3]
+
+```{r}
+eddie_tib |>
+  dplyr::sample_n(10) |> 
+  knitr::kable(caption = "Spotify data for the band Iron Maiden", digits = 2)
+```
+
+::: callout-note
+## Fun fact
+
+Andy met Iron Maiden when he was 13 years old. There's a photo in @Flack2018. There is not a photo in @Bartos2023.
+:::
+
+## Iron Equation
+
+$$
+\text{Happy} = \hat{B}_{0} + \hat{B}_1\text{iron maiden} + \Sigma
+$$
+
+```{r}
+mean(energy_tib$energy, trim = 0.1)
+```
+
+There is some data in @tbl-eddie from spotify
+
+```{r}
+#| tbl-cap: Some data from spotify
+#| label: tbl-eddie
+knitr::kable(eddie_tib, digits = 2)
+```
+
+```{r}
+#| tbl-cap: Blah Blah
+#| label: tbl-test
+energy_tib <- eddie_tib |>
+  dplyr::select(track_name, energy, valence)
+knitr::kable(energy_tib)
+```
+
+testing in @tbl-test

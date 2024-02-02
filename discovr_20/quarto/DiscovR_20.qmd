@@ -1,0 +1,592 @@
+---
+title: "DiscovR_20"
+author: "Ferdinand Edward Bitan"
+format: 
+  html:
+    self-contained: true
+    theme: darkly
+    toc: true
+    code-fold: true
+knitr: 
+  opts_chunk: 
+    warning: false
+    message: false
+editor: visual
+---
+
+# DiscovR_20
+
+## Libraries
+
+```{r}
+library(broom)
+library(interactions)
+library(knitr)
+library(here)
+library(tidyverse)
+```
+
+## Data
+
+```{r}
+santa_tib <- here::here("data/santas_log.csv") |>
+  readr::read_csv() |>
+   dplyr::mutate(
+    treat = forcats::as_factor(treat) |>
+      forcats::fct_relevel("Pudding", "Mulled wine"),
+    delivered = forcats::as_factor(delivered) |>
+      forcats::fct_relevel("Not delivered", "Delivered")
+  )
+```
+
+## A Christmas Disaster
+
+Let's begin with a Christmas tale. A year ago Santa was resting in his workshop studying his nice and naughty lists. He noticed a name on the naughty list in bold, upper case letters. It said **ANDY FIELD OF UNIVERSITY OF SUSSEX**. He went to look up the file of this Andy Field character. He stared into his snow globe, and as the mists cleared he saw a sad, lonely, friend-less character walking across campus. Under one arm a box of chocolates, under the other a small pink Hippo. As he walked the campus he enticed the young students around him to follow him by offering chocolate. Like the Pied Piper, he led them to a large hall. Once inside, the boys and girls' eyes glistened in anticipation of more chocolate. Instead he unleashed a monologue about the general linear model of such fearsome tedium that Santa began to wonder how anyone could have grown to be so soulless and cruel.
+
+Santa dusted off his sleigh and whizzed through the night sky to the Sussex campus. Once there he confronted the evil fiend that he had seen in his globe. "You've been a naughty boy," he said. "I give you a choice. Give up teaching statistics, or I will be forced to let the [Krampus](https://en.wikipedia.org/wiki/Krampus) pay you a visit."
+
+Andy looked sad, "But I love statistics," he said to Santa, "It's cool."
+
+Santa pulled out a candy cane, from it emerged a screen. Just as he was about to instruct the screen to call the Krampus, an incoming message appeared. It was Eddie the Elf. Eddie said that last year 10.6% of presents weren't delivered.
+
+What was Santa to do? How could he find out what determines whether presents get delivered or not? He panicked.
+
+Just then, Santa heard a sad little voice. It said, "I can help you".
+
+"How? replied Santa.
+
+"My students," he replied, "they can save Christmas. All they need are data."
+
+With that, Santa looked into his candy screen at the elves who had called him, and turned to Andy. "Tell them what you need."
+
+Andy discovered that to deliver presents Santa uses a large team of elves, and that at each house they usually consume treats. The treats might be Christmas pudding, or sometimes mulled wine. He also discovered that they consume different quantities. Sometimes nothing is left, but other times there might be 1, 2, 3 or even 4 pieces of pudding or glasses of mulled wine. The Elves transmitted a log file of 400 of the previous year's deliveries. It was called santa_tib.
+
+-   **id**: Name of the elf doing the delivery
+
+-   **quantity**: How many treats the elf ate before attempting the delivery
+
+-   **treat**: which kind of treats were consumed (Christmas pudding or Mulled wine)
+
+-   **delivered**: were the presents delivered (Delivered or not delivered)
+
+```{r}
+santa_tib
+```
+
+Note that there are four variables:
+
+-   **id**: a character variable (note the under the name) containing the name of the elf.
+
+-   **quantity**: a numeric variable (note the under the name) indicating how many treats the elf ate before attempting the delivery.
+
+-   **treat**: a factor variable (note the under the name) indicating the type of treat(s) that the elf consumed (Christmas pudding or Mulled wine).
+
+-   **delivered**: a factor variable (note the under the name) whether the presents were delivered by the elf (Delivered or Not delivered).
+
+The variables **treat** and **delivered** are factors (categorical variable), so having read the data file and converted these variables to factors it's a good idea to check the order of the levels for each one.
+
+```{r}
+levels(santa_tib$treat)
+levels(santa_tib$delivered)
+```
+
+You'll find that the factor levels are:
+
+-   For **treat**, the baseline category is 'pudding'.
+
+-   For **delivered** the factor levels are ordered 'not delivered' and 'delivered' so an 'increase' in the outcome corresponds to delivery becoming more probable.
+
+These category orders are as they are because I set the data up within this tutorial. Working outside of the tutorial you might need to manually set the order of levels for each factor using `forcats::fct_relevel()` as described in the Data part of this tutorial.
+
+## The Model
+
+![](images/model1.png)
+
+## Odds and the Odd Ratio
+
+### Odds
+
+![](images/odds.png)
+
+**Using Table 1, the odds of delivery are?**
+
+0.82
+
+0.6
+
+*1.67*
+
+5.36
+
+### The Odds Ratio
+
+![](images/odds2.png)
+
+**Using Table 1, what are the odds of delivery after wine?**
+
+1.67
+
+5.36
+
+*0.82*
+
+1.22
+
+**Using Table 1, what are the odds of delivery after pudding?**
+
+0.19
+
+*5.36*
+
+1.67
+
+0.82
+
+**Using the answers to the previous two questions, what is the odds ratio for wine compared to pudding?**
+
+0.82
+
+*0.15*
+
+6.67
+
+6.18
+
+## Exploring the Data
+
+Our outcome variable is categorical so to summarise it we want to look at frequencies, or counts (that is, how many cases fall into different categories). A simple but crude way to get a crosstabulation table of frequencies is the `xtabs()` function, but we can also use what we know about tidyverse too. We used both of these methods in `discovr_19`, and we'll revisit them here.
+
+### Using xtabs()
+
+The `xtabs()` function is part of base . When we used it in `discovr_19` we applied it to a data set that contained the frequencies rather than the raw data, and we saw that it takes this form.
+
+```         
+xtabs(frequency ~ row_variable + column_variable + table_variable, data = tibble)
+```
+
+When applying `xtabs()` to raw data we can omit the frequencies (because they don't exist) and instead the function takes this general form:
+
+```         
+xtabs(~ row_variable + column_variable + table_variable, data = tibble)
+```
+
+Essentially we replace row_variable and column_variable with the variables in the data that you would like to form the rows and columns of the contingency table respectively. In more complex situations you can specify a third categorical variable as the table_variable and separate contingency tables will be created for each category of that third variable.
+
+To look at the table of frequencies for the variables of **treat** and **delivered** we'd execute:
+
+```         
+delivery_xtab <- xtabs(~ treat + delivered, data = santa_tib)
+```
+
+Use the code box to create a table of frequencies for the variables of **treat** and **delivered**. You should get a table that shows the four frequencies in Table 1 (ignoring the column and row labelled 'Total').
+
+```{r}
+delivery_xtab <- xtabs(~ treat + delivered, data = santa_tib)
+delivery_xtab
+```
+
+### Using Tidyverse
+
+A different approach is to use all of the tidyverse skills we have acquired. Specifically, we can use code that we learnt about in `discovr_19`. To remind you, in that tutorial we used the following `dplyr` functions:
+
+-   `group_by()`: groups the data by whatever variable (or variables) you name within the function.
+
+-   `tally()`: counts the number of cases.
+
+To count the frequencies of scores we need to do two things:
+
+1.  Tell R which categories we want to count. For example, we could use `group_by(treat)` to tell R that we want to conduct any future commands on the 'Pudding' and 'Mulled wine' categories separately. However, we want to count across all combinations of **treat** and **delivered** so we need to include both variables in the function: `group_by(treat, delivered)`.
+
+2.  Count how many scores fall into each 'category'. This is done using `tally()`, which counts how many cases are in each group created by `group_by()`. This variable will, therefore, contain the number of times each combination of the values of **treat** and **delivered** occur.
+
+This might all make more sense if we have a go. I'll show you the pipe and then explain it line by line:
+
+```         
+santa_xtab <- santa_tib |>
+  dplyr::group_by(treat, delivered) |>
+  dplyr::tally()
+```
+
+Let's look at each line:
+
+1.  The first line creates an object `santa_xtab`. We begin by passing the `santa_tib` tibble into the pipe.
+
+2.  The second line groups the data by all combinations of **treat** and **delivered**. It effectively creates 4 cells: 2 categories of treat (pudding, mulled wine) × 2 categories of delivery (delivered, not delivered). To be explicit it creates these combinations: {pudding, not delivered}, {pudding, delivered}, {mulled wine, not delivered} and {mulled wine, delivered}
+
+3.  The final line uses the `tally()` function to count the cases. The function creates a variable called **n** and, because in the previous line we grouped the data by all combinations of variables, counts the number of observations in each of the 4 combinations of categories. In effect, we have calculated the cell frequencies for all combinations of **treat** and **delivered**.
+
+```{r}
+santa_xtab <- santa_tib |> 
+  dplyr::group_by(treat, delivered) |> 
+  dplyr::tally()
+santa_xtab # This line displays the object we created above
+```
+
+You should see a tibble with 4 rows representing the different combinations of **treat** and **delivered**, and a variable (**n**) containing their cell counts. The values should match Table 1.
+
+If we want the table to look like Table 1, where values for 'delivered' and 'not delivered' are spread across columns, we use `pivot_wider` (`discovr_06`, `discovr_09` and `discovr_19`) to spread the values for the variable **delivered** across columns of the table. To remind you, the `pivot_wider()` restructures rows into columns. It's general form is:
+
+```         
+tidyr::pivot_wider(
+  data = tibble,   
+  id_cols = variables_that_you_do_not_want_to_restructure,   
+  names_from = "variable_containing_the_names_of_columns",   
+  values_from = " variable_containing_the_scores",
+)
+```
+
+If we want to spread values associated with 'delivered' and 'not delivered' across columns then we want to get the column names_from the variable **delivered**. The frequencies are stored in the variable **n**, so we'd want to get values_from from that variable. Finally, we want to leave categories of **treat** in rows so we'd select **treat** as the id_cols.
+
+Assuming we've already created the object santa_xtab as above, we could use this code:
+
+```         
+santa_xtab <- santa_xtab |>
+  tidyr::pivot_wider(
+    id_cols = "treat",
+    names_from = "delivered",
+    values_from = "n"   
+  )
+```
+
+```{r}
+santa_xtab <- santa_xtab |> 
+  tidyr::pivot_wider(
+    id_cols = "treat",
+    names_from = "delivered",
+    values_from = "n"
+  )
+santa_xtab # This line displays the object we created above
+```
+
+## Fitting the Model
+
+### The glm() Function
+
+To fit the model we use the function `glm()` which stands for 'generalized linear model'. The function takes the same form as `lm()`, which we have used many times before. However, it differs in that it allows you to specify a specific distribution for the errors in the model. When the outcome is a dichotomy (categorical with two categories) we need to specify the family as `binomial()` giving us a general form of the function as follows:
+
+```         
+glm(outcome ~ predictor(s),
+  data = my_tib,
+  family = binomial(),
+  na.action = na.fail)
+```
+
+In which you replace outcome \~ predictor(s) with the formula for your model in exactly the same you would for `lm()`. In this case, we want to predict **delivered** from **treat** so our formula is delivered \~ treat. We replace my_tib with the name of our tibble (in this case santa_tib). Alternatively we can pipe the tibble into `glm()` and use data = .. The argument na.action = na.fail determines how to treat missing values. By default it is set to na.fail which means that the model fails (it is not fit). If you have missing values then set this option to na.omit which removes cases, or na.exclude which excludes cases from the model (but does not remove them).
+
+In addition to these familiar arguments, there is
+
+-   family = guassian(), which determines the distribution of errors. By default the family is set to `guassian()` (a posh word for 'normal') and the function will fit a standard linear model. By changing it to family = binomial() we get a logistic linear model.
+
+We could fit our model by executing:
+
+```         
+santa_glm <- glm(delivered ~ treat, data = santa_tib, family = binomial())
+```
+
+We can use the methods in the `broom` package with the resulting object, which means that we can obtain the model fit using `glance()` and the model parameters using `tidy()`:
+
+```         
+broom::glance(santa_glm) 
+broom::tidy(santa_glm, conf.int = TRUE)
+```
+
+We will focus on using `tidy()` to view the model parameters because with logistic models you don't get overall significance tests for fit (although we look at ways to obtain these statistics in due course).
+
+```{r}
+santa_glm <- glm(delivered ~ treat, data = santa_tib, family = binomial())
+broom::tidy(santa_glm, conf.int = TRUE) |> 
+  knitr::kable(digits = 2)
+```
+
+![](images/int.png)
+
+We can get `tidy()` to do this conversion for us by including the argument exponentiate = TRUE.
+
+```         
+broom::tidy(santa_glm, conf.int = TRUE, exponentiate = TRUE)
+```
+
+```{r}
+broom::tidy(santa_glm, conf.int = TRUE, exponentiate = TRUE) |> 
+  knitr::kable(digits = 2)
+```
+
+Th output has changed: it now contains the model parameters expressed as odds rather than log odds. For b\^0, then, the odds of delivery in the baseline (pudding) group were 5.36. We calculated this value earlier, it means that 5.36 times more presents were delivered than not after consuming Christmas pudding.
+
+The parameter estimate for the variable **treat** is b\^ = 0.15, and this matches the value of the odds ratio that we calculated earlier. Look back to that section and you'll see that this value means that the odds of delivery after wine are 0.15 the odds of delivery after pudding. Put another way, the odds of delivery are about 1/0.15 = 6.67 times smaller after wine than pudding.
+
+Assuming the current sample is one of the 95% for which the confidence interval contains the true value, then the population value of the odds ratio for **treat** lies between 0.09 and 0.24. However, our sample could be one of the 5% that produces a confidence interval that 'misses' the population value. The important thing is that the interval **does not contain 1** (both values are less than 1). The value of 1 is important because it is the threshold at which the direction of the effect changes. Think about what the odds ratio represents: values greater than 1 mean that as the predictor variable increases, so do the odds of (in this case) delivery, but values less than 1 mean that as the predictor variable increases, the odds of delivery decrease. If the value is 1 it means that the odds of delivery are identical for pudding and wine. In other words, there is no effect at all of treat.
+
+If the confidence interval contains 1 then the population value might be one that suggests that the type of treat increases the odds of delivery, or decreases it or doesn't change it. For our confidence interval, the fact that both limits are below 1 suggests that the direction of the relationship that we have observed reflects that of the population (i.e., it's likely that the odds of delivery after wine really are worse than after pudding). If the upper limit had been above 1 then it would tell us that there is a chance that in the population the odds of delivery are actually higher after wine than pudding, or that the type of treat makes no difference at all.
+
+Now we have the basic understanding of what the parameters mean, consider working through the optional section on looking at the overall model fit.
+
+![](images/report1.png)
+
+### Assessing Overall Fit
+
+To get test of overall fit we need to build up models step-by_step and use `anova()` to compare them. In this example, with only a single predictor this would mean fitting a model with only the intercept, then fitting a model that includes the predictor and comparing the two models:
+
+```         
+santa_int <- glm(delivered ~ 1, data = santa_tib, family = binomial()) 
+santa_treat <- glm(delivered ~ treat, data = santa_tib, family = binomial()) 
+anova(santa_int, santa_treat, test = "Chisq")
+```
+
+The first line of code specifies a model that predicts deliveries from the intercept, the second line fits a model that predicts deliveries from both the intercept and the variable **treat**. The final line compares the two previously created model and applies a Chi square-test that tests whether the change in the deviance statistic is significantly different from zero (in other words has the fit of the model significantly improved because of including **treat** as a predictor).
+
+```{r}
+santa_int <- glm(delivered ~ 1, data = santa_tib, family = binomial())
+santa_treat <- glm(delivered ~ treat, data = santa_tib, family = binomial())
+anova(santa_int, santa_treat, test = "Chisq") |>  
+knitr::kable(digits = 3)
+```
+
+The residual deviance statistic Resid. Dev is a measure of model fit (think of it like the total error - large values mean poorer fit). Note that with the intercept only model the residual deviance is 529.25 but when we include treat it reduces to 460.49 : a reduction of 68.76 (the value in the table under Deviance) The fact that the deviance got smaller means that the fit has improved. The Chi-square test tells us whether this reduction of 68.76 is significantly different from zero (i.e., no reduction). If this change in the residual deviance is significantly different from 0 then the model fit has improved, which is the case here. Put another way, a significant deviance shows that by including **treat** as a predictor the fit of the model significantly improves compared to when it wasn't included.
+
+## Multiple Predictors
+
+It seems like the type of treat affects the odds of delivery. However, the elves don't want to be banned from the mulled wine so they ask Santa whether the issue might actually be the quantity of treats they consume? We can extend the model to include the quantity of treats as a predictor and also the interaction between the quantity of treats consumed and the type of treat consumed.
+
+### The Model
+
+![](images/model2.png)
+
+### Hierarchical Variable Entry
+
+This optional section shows how we could build up the model step-by-step and look at the overall change in the fit at each step. This is useful in two situations. First if you want to do hierarchical variable entry (that is, build up the model in a theory-driven way) this would be the way to do it. Second, it is useful to quantify the overall significance of categorical predictors made up of several categories (i.e., that are split across several dummy variables).
+
+We can use the same code as before but add two new models that add in quantity and the interaction term. A quicker way to add (or subtract) things to a model is to use the `update()` function, which takes this form:
+
+```         
+update(model_to_update, .~. + new_predictor)
+```
+
+Basically, this function takes any existing model placed within it and updates it according to any changes you specify. So, we'd replace model_to_update with the name of the model we want to update. The .\~. tells it to retain the existing outcome and predictors (incidentally .\~ would tell it to retain the outcome variable but drop all predictors). We replace new_predictor with the name of the predictor we want to add.
+
+Let's look at an example. Earlier on we used this code to specify two models:
+
+```         
+santa_int <- glm(delivered ~ 1, data = santa_tib, family = binomial()) 
+santa_treat <- glm(delivered ~ treat, data = santa_tib, family = binomial())
+```
+
+Using update we'd use
+
+```         
+santa_int <- glm(delivered ~ 1, data = santa_tib, family = binomial()) 
+santa_treat <- update(santa_int, .~. + treat)
+```
+
+The second line now creates santa_treat by updating santa_int to include treat as a predictor. We can subsequently update this model to include **quantity** as a predictor and then update that model to include the interaction:
+
+```         
+santa_int <- glm(delivered ~ 1, data = santa_tib, family = binomial()) 
+santa_treat <- update(santa_int, .~. + treat) 
+santa_quant <- update(santa_treat, .~. + quantity) 
+santa_full <- update(santa_quant, .~. + treat:quantity)
+```
+
+Note that each time we change the name of the model being updated to the model at the previous step, and also note that the interaction is specified using treat:quantity (see the tip in the next section)
+
+We can now compare these models as before using:
+
+```         
+anova(santa_int, santa_treat, santa_quant, santa_full, test = "Chisq")
+```
+
+```{r}
+santa_int <- glm(delivered ~ 1, data = santa_tib, family = binomial())
+santa_treat <- update(santa_int, .~. + treat)
+santa_quant <- update(santa_treat, .~. + quantity)
+santa_full <- update(santa_quant, .~. + treat:quantity)
+anova(santa_int, santa_treat, santa_quant, santa_full, test = "Chisq")  |> 
+  knitr::kable(digits = 3)
+```
+
+Note that for each model we add one new predictor so the degrees of freedom decrease by 1 at each step. Also note that each model significantly improves the fit compared to the previous model (i.e., each model significantly decreases the residual deviance) suggesting that each predictor is significant.
+
+As I mentioned, this step-by-step process is useful if (1) you want to do hierarchical variable entry (that is, build up the model in a theory-driven way), or (2) you have a predictor with multiple categories and you want to know its overall effect.
+
+### Fitting the Model in One Step
+
+We can extend the model using `glm()` but with an updated formula.
+
+*Remember from `discovr_10` that `*` is used to specify all main effects and interactions whereas `:` is used to specify only an interaction. Therefore we can update the formula for the model that predicts Christmas deliveries by either specifying the effects of **treat**, quantity and the **treat × quantity** interaction implicitly with*
+
+```         
+delivered ~ treat*quantity
+```
+
+*or by specifying the three effects explicitly with*
+
+```         
+delivered ~ treat + quantity + treat:quantity
+```
+
+```{r}
+santa_full_glm <- glm(delivered ~ treat*quantity, data = santa_tib, family = binomial())
+broom::tidy(santa_full_glm, conf.int = TRUE) |> 
+  knitr::kable(digits = 2)
+```
+
+From the resulting table we can see that b\^0 is 1.83, which means that when all predictors are zero (i.e. the situation where zero puddings were consumed, and the interaction term is zero too) the *log* odds of delivery were 1.83. The b\^s for the main effects of **treat** and **quantity** are both quite close to zero indicating very small effects. However, the interaction effect *is* significant (*p* \< 0.001), and the b\^-value suggests that as combined effect of treat and quantity increases by one unit, the log odds of delivery change by -1.03 units. Whatever that means. To make (more) sense of these effects lets convert the parameters back to odds.
+
+```{r}
+broom::tidy(santa_full_glm, conf.int = TRUE, exponentiate = TRUE) |> 
+  knitr::kable(digits = 2)
+```
+
+![](images/int2.png)
+
+### Plotting the Interaction
+
+A useful way to visualise the interaction is to plot it. The `interact_plot()` function from `interactions` will plot interaction effects from logistic models. It takes the general form:
+
+```         
+interactions::interact_plot(my_model, pred = my_predictor, modx = my_moderator)
+```
+
+Basically you replace my_model with the name of your model, my_predictor with the name of the predictor variable (in this case **quantity** makes sense) and my_moderator with the name of the moderator variable (in this case **treat** makes sense). We looked at moderation in **discovr_10**, but in this context what matters is that the predictor is plotted on the *x*-axis whereas the moderator is used to split the data. If we specify **quantity** as the predictor and **treat** as the moderator we'll get the effect of quantity on delivery and different lines for Christmas pudding and mulled wine.
+
+The output is a `ggplot2` object, which means that you can augment it with any functions and
+
+To plot the **treat × quantity** interaction effect use this code:
+
+```         
+interactions::interact_plot(santa_full_glm, pred = quantity, modx = treat)
+```
+
+```{r}
+interactions::interact_plot(santa_full_glm, pred = quantity, modx = treat) +
+  labs(x = "Quantity of treats consumed", y = "Probability of delivery", fill = "Treat") +
+  theme_minimal()
+```
+
+The plot very clearly shows that for Christmas pudding the probability of delivery doesn't change much as the quantity of treats increases (the blue line is flat). However, for mulled wine, as the quantity consumed goes up the probability of delivery decreases: basically, the more wine the elves drink the lower the probability of delivery. This effect really starts to kick in at a quantity of two.
+
+### Breaking Down the Interaction
+
+Another approach is to look at what the odds ratio of 0.36 for the interaction means, by fitting separate models for mulled wine and Christmas pudding that predict deliveries from **quantity** alone. There's various ways we could do this. We could, for example, use `filter()` to select only cases of mulled wine before piping into the `glm()` function. However, the `glm()` function contains an argument subset that allows you to subset the data directly from within the function. In general
+
+```         
+glm(outcome ~ predictor(s),
+    data = my_tib,
+    subset = filtering_instructions,
+    family = binomial(),
+    na.action = na.fail)
+```
+
+Notice that I have included the subset argument (which I omitted before to keep things simple). We need to replace filtering_instructions with instructions like we would use in `filter()`. So, if we wanted to fit a model only to elves who ate Christmas pudding we would replace filtering_instructions with treat == "Pudding" giving us:
+
+```         
+pudding_glm <- glm(delivered ~ quantity,
+                    data = santa_tib,
+                    subset = treat == "Pudding",
+                    family = binomial())
+```
+
+Note that the model formula has changed to delivered \~ quantity because we want to predict deliveries by quantity alone, and we have included subset = treat == "Pudding" so that this model is applied only to cases where the variable **treat** has the value "Pudding".
+
+Similarly, we can fit a model to the elves who had mulled wine by setting the subset argument to subset = treat == "Mulled wine".
+
+```         
+wine_glm <- glm(delivered ~ quantity,
+                data = santa_tib,
+                subset = treat == "Mulled wine",
+                family = binomial())
+```
+
+Create the models pudding_glm using the code above. View the exponentiated parameter estimates of both models.
+
+```{r}
+pudding_glm <- glm(delivered ~ quantity, data = santa_tib, subset = treat == "Pudding", family = binomial())
+
+broom::tidy(pudding_glm, conf.int = TRUE, exponentiate = TRUE) |> 
+  knitr::kable(digits = 2)
+```
+
+**How would you interpret the odds ratio for the effect of quantity**?
+
+*As the quantity increased by 1 unit, the odds of delivery change by 0.92*
+
+As the quantity increased by 1 unit, deliveries increased by 1 unit
+
+As the quantity increases by 1 standard deviation, deliveries increased by 1 standard deviation
+
+As the quantity increase by 1 unit, the log odds of delivery change by 0.92
+
+The output shows the effect of the quantity of Christmas pudding consumed on delivery of presents. The the odds ratio is close to 1 (ORˆ= 0.92), and the *p* = 0.63, which all suggest that quantity has no real effect when the treat consumed is pudding. This mirrors what was shown by the blue line in the plot: the line is fairly flat suggesting that quantity of pudding consumed doesn't affect the probability of delivery.
+
+Create the models wine_glm using the code above. View the exponentiated parameter estimates of both models.
+
+```{r}
+wine_glm <- glm(delivered ~ quantity, data = santa_tib, subset = treat == "Mulled wine", family = binomial())
+
+broom::tidy(wine_glm, conf.int = TRUE, exponentiate = TRUE) |> 
+  knitr::kable(digits = 2)
+```
+
+The output shows the effect of the quantity of mulled wine consumed on delivery of presents. The odds ratio is closer to 0 than 1 (ORˆ = 0.33), and the *p* \< 0.001, which suggests that quantity has a negative effect on deliveries: as quantity of mulled wine increases the odds of delivery decrease. This mirrors what was shown by the orange line on the plot we made earlier: as quantity increases the probability of delivery rapidly declines.
+
+The interaction effect, therefore, reflects the fact that the effect of quantity on delivery is significantly different for Christmas pudding and mulled wine. As a rough approximation it means that in the plot, the blue and orange lines have different slopes.
+
+![](images/report2.png)
+
+As an optional exercise that might help you understand the interaction, use the code box to view the *raw* parameter estimates for pudding_glm and wine_glm to three decimal places. (Hint: use `tidy()` but setting exponentiate = F.)
+
+```{r}
+broom::tidy(pudding_glm, conf.int = TRUE) |> 
+  knitr::kable(digits = 2)
+broom::tidy(wine_glm, conf.int = TRUE) |> 
+  knitr::kable(digits = 2)
+```
+
+The interaction effect reflects the fact that the effect of quantity on delivery is significantly different for Christmas pudding and mulled wine. From the outputs, the log odds of delivery for Christmas pudding are -0.08 and for mulled wine are -1.11. The significant interaction means that -0.08 is significantly different from -1.11.
+
+Interestingly, if we calculate the difference between the b\^s we get: −1.11−(−0.08)=−1.03−1.11−(−0.08)=−1.03, which was the parameter estimate for the interaction effect. And if we take the exponent of this value we get the odds ratio for the interaction effect: e\^−1.03 = 0.36.
+
+So, the odds ratio for the interaction is the odds ratio for the difference in the effect of one predictor across levels of the other. In this case, it's the odds ratio for the difference between the effect of quantity of Christmas pudding on delivery and the effect of the quantity of mulled wine on delivery.
+
+## Robust Logistic Regression
+
+It is also possible to create a robust model using the `glmrob()` function from the `robustbase` package. This takes the same form as the `glm()` function but returns robust estimates of parameters and associated standard errors and *p*-values.
+
+To create a robust variant of the model we would execute:
+
+```         
+santa_rob <- robustbase::glmrob(delivered ~ treat*quantity,                                                             data = santa_tib,
+                                family = binomial())
+broom::tidy(santa_rob)
+```
+
+which creates an object santa_rob that contains robust model parameters. We can again summarise it with `broom::tidy()` but we cannot use exponentiate = TRUE with robust models.
+
+```{r}
+santa_rob <- robustbase::glmrob(delivered ~ treat*quantity, data = santa_tib, family = binomial())
+broom::tidy(santa_rob, conf.int = TRUE) |> 
+  knitr::kable(digits = 2)
+```
+
+Compare the resulting model to the one you created earlier. Basically, the parameter estimates (b\^s) don't change much and the conclusions of the model stay largely the same. For example, the parameter estimate for the interaction term was b\^ = -1.03 for the non-robust model but b\^ = -1.05 for the robust model.
+
+As I mentioned, exponentiate = TRUE doesn't work in `tidy()` with robust models, but we can manually convert the robust b\^ to an odds ratio by remembering that the output of `tidy()` is tibble. Therefore, we can use `mutate` to add a column that is the exponent (`exp()`) of the parameter estimate:
+
+```         
+broom::tidy(santa_rob, conf.int = TRUE) |>
+  dplyr::mutate(
+    OR = exp(estimate)
+  )
+```
+
+This code pipes the output of `tidy()` into the mutate function where we create a variable called **OR** which is the exponent of the column called **estimate**.
+
+```{r}
+broom::tidy(santa_rob, conf.int = TRUE) |> 
+  dplyr::mutate(
+    OR = exp(estimate)
+  ) |> 
+  knitr::kable(digits = 2)
+```
+
+Scroll to the far right of the table to view the new column in the table that you created (labelled **OR**). As you'd expect based on the raw parameter estimate, the robust odds ratio of OR\^ = 0.35 is virtually identical to the one from the non-robust model, which was 0.36. The robust model gives us confidence that we can trust the original model. If the parameters were very different we'd report the robust model.
